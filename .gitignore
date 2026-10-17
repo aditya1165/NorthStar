@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+*.egg-info/
+
+# JavaScript
+node_modules/
+dist/
+coverage/
+playwright-report/
+test-results/
+*.tsbuildinfo
+frontend/vite.config.js
+frontend/vite.config.d.ts
+
+# Data and models
+data/generated/*
+!data/generated/.gitkeep
+data/models/*
+!data/models/.gitkeep
+
+# Environment and editor files
+.env
+.env.*
+!.env.example
+.DS_Store
+.idea/
+.vscode/
+

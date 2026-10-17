@@ -1,0 +1,18 @@
+{
+  "scenario_id": "world-cup-egress",
+  "name": "World Cup post-match egress",
+  "seed": 42,
+  "zones": [
+    "north_concourse",
+    "east_corridor",
+    "west_concourse",
+    "gate_a",
+    "gate_c",
+    "metro_plaza"
+  ],
+  "scripted_incidents": ["gate-b-closure", "metro-delay"],
+  "forecast_horizons_minutes": [5, 10],
+  "rollout_minutes": 15,
+  "rollout_seeds": [42, 43, 44, 45, 46]
+}
+
