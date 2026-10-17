@@ -24,6 +24,13 @@ uvicorn app.main:app --reload
 
 The API is available at `http://localhost:8000`; interactive documentation is at `http://localhost:8000/docs`.
 
+Run the deterministic forecasting baseline directly:
+
+```bash
+cd backend
+python -m scripts.run_baseline --gate-b-closed --metro-delayed --steps 8
+```
+
 ### Frontend
 
 ```bash
