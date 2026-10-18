@@ -1,4 +1,11 @@
-import type { CongestionSnapshot, PersonMovementState, PersonTelemetrySample } from "../congestion/types";
+import type {
+  CongestionSnapshot,
+  PersonMovementState,
+  PersonPhase,
+  PersonTelemetrySample,
+  RouteAssignment,
+  SectionHold,
+} from "../congestion/types";
 import { angleDelta, ringPoint } from "../domain/geometry";
 import type { GateId, InterventionOption, TwinSnapshot, VenueLayout } from "../domain/types";
 
@@ -25,6 +32,24 @@ const Phase = {
 
 export const AGENT_COLOR = { normal: 0, rerouted: 1, waiting: 2 } as const;
 
+/**
+ * "local": the field chooses gates itself (offline fallback).
+ * "backend": Python owns routing; the field only executes assignment deltas.
+ */
+export type RoutingMode = "local" | "backend";
+
+const PHASE_NAME: Record<number, PersonPhase> = {
+  [Phase.Waiting]: "waiting",
+  [Phase.Row]: "row",
+  [Phase.Aisle]: "aisle",
+  [Phase.BaseRing]: "base_ring",
+  [Phase.GateCorridor]: "gate_corridor",
+  [Phase.Queue]: "queue",
+  [Phase.ReturnToBase]: "return_to_base",
+  [Phase.Exit]: "exit",
+};
+const FIRST_SECTION_NUMBER = 201;
+
 const GATE_IDS: GateId[] = [
   "gate_a",
   "gate_b",
@@ -36,7 +61,7 @@ const GATE_IDS: GateId[] = [
   "gate_h",
 ];
 const GATE_INDEX = Object.fromEntries(GATE_IDS.map((id, index) => [id, index])) as Record<GateId, number>;
-const WALK_SPEED = 13;
+const WALK_SPEED = 1.3;
 const MAX_STEP = 0.04;
 const METERS_PER_SCENE_UNIT = 6;
 const QUEUE_INNER_SCALE = 1.07;
@@ -99,8 +124,10 @@ export class CrowdField {
   private gateCredit: Float32Array;
   private queues: number[][];
   private queueHead: Uint32Array;
+  private heldUntil: Float32Array;
 
   time = -3;
+  routingMode: RoutingMode = "local";
 
   constructor(venue: VenueLayout, count: number) {
     this.venue = venue;
@@ -138,11 +165,13 @@ export class CrowdField {
     this.gateCredit = new Float32Array(GATE_IDS.length);
     this.queues = GATE_IDS.map(() => []);
     this.queueHead = new Uint32Array(GATE_IDS.length);
+    this.heldUntil = new Float32Array(venue.sections.length).fill(-Infinity);
     this.reset(0);
   }
 
   reset(time: number) {
     this.rand = rng(20260614);
+    this.heldUntil.fill(-Infinity);
     this.gateCredit.fill(0);
     this.queueHead.fill(0);
     this.queues = GATE_IDS.map(() => []);
@@ -161,7 +190,7 @@ export class CrowdField {
       this.hashA[i] = this.rand();
       this.hashB[i] = this.rand();
       this.phase[i] = Phase.Waiting;
-      this.timer[i] = (sectionIndex / sections.length) * 2 + this.hashA[i] * 2;
+      this.timer[i] = (sectionIndex / sections.length) * 8 + this.hashA[i] * 8;
       this.visible[i] = 1;
       this.colorClass[i] = AGENT_COLOR.normal;
       this.angle[i] = this.seatAngle[i];
@@ -219,12 +248,43 @@ export class CrowdField {
     return ctx.closedGates.has(reroute.gate) ? null : gate;
   }
 
+  /**
+   * Execute Python routing deltas. People already exiting keep their gate;
+   * people in a gate corridor or queue walk back to the base path first.
+   * Returns the number of people whose gate changed.
+   */
+  applyAssignments(assignments: readonly RouteAssignment[]): number {
+    let applied = 0;
+    for (const { personId, toGate } of assignments) {
+      if (personId < 0 || personId >= this.count) continue;
+      const phase = this.phase[personId];
+      const gate = GATE_INDEX[toGate];
+      if (gate === undefined || phase >= Phase.Exit || this.target[personId] === gate) continue;
+      this.target[personId] = gate;
+      this.colorClass[personId] = AGENT_COLOR.rerouted;
+      this.lastRerouteAt[personId] = this.time;
+      if (phase === Phase.GateCorridor || phase === Phase.Queue) this.phase[personId] = Phase.ReturnToBase;
+      applied += 1;
+    }
+    return applied;
+  }
+
+  /** Keep seated people in the given sections from leaving until `untilSeconds` of simulation time. */
+  setHolds(holds: readonly SectionHold[]) {
+    for (const { section, untilSeconds } of holds) {
+      const index = section - FIRST_SECTION_NUMBER;
+      if (index < 0 || index >= this.heldUntil.length) continue;
+      this.heldUntil[index] = Math.max(this.heldUntil[index], untilSeconds / 60);
+    }
+  }
+
   /** Load-aware routing driven by gate state and backend-confirmed congestion. */
   private selectGate(i: number, ctx: Context): number {
     const planned = this.plannedGate(i, ctx);
     if (planned !== null) return planned;
 
     const current = this.target[i];
+    if (this.routingMode === "backend") return current;
     const currentId = GATE_IDS[current];
     const signal = ctx.signals.get(currentId);
     const closed = ctx.closedGates.has(currentId);
@@ -267,7 +327,7 @@ export class CrowdField {
       switch (this.phase[i]) {
         case Phase.Waiting:
           this.currentSpeedMps[i] = 0;
-          this.timer[i] -= dt;
+          if (this.time >= this.heldUntil[this.section[i]]) this.timer[i] -= dt;
           if (this.timer[i] <= 0) this.phase[i] = Phase.Row;
           break;
 
@@ -471,6 +531,7 @@ export class CrowdField {
         speedMps: Math.round(this.currentSpeedMps[i] * 100) / 100,
         targetGate,
         movementState: movementState[this.phase[i]],
+        phase: PHASE_NAME[this.phase[i]],
       });
     }
     return { agents, exitedAgents };

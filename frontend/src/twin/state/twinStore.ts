@@ -15,7 +15,18 @@ import type {
   TwinSnapshot,
   VenueLayout,
 } from "../domain/types";
+import { approveIntervention as approveLiveIntervention, evaluateInterventions, type LiveEvaluation, type LivePlan } from "../live/api";
 import type { CrowdTwinService } from "../services/CrowdTwinService";
+
+export interface LiveHistoryPoint {
+  minute: number;
+  density: number;
+  zoneId: string;
+}
+
+type LiveEvaluationStatus = "idle" | "evaluating" | "error";
+
+const LIVE_HISTORY_LIMIT = 600;
 
 export type LayerKey = "agents" | "density" | "forecast" | "routes" | "labels";
 export type CameraPreset = "overview" | "top" | "incident";
@@ -28,6 +39,16 @@ interface TwinState {
   congestion: CongestionSnapshot | null;
   congestionConnection: CongestionConnectionStatus;
 
+  /** Telemetry run id currently streamed to the backend. */
+  liveRunId: string | null;
+  /** Peak live zone density per backend reply, for the timeline. */
+  liveHistory: LiveHistoryPoint[];
+  liveEvaluation: LiveEvaluation | null;
+  liveEvaluationStatus: LiveEvaluationStatus;
+  liveEvaluationError: string | null;
+  liveSelectedId: string | null;
+  livePlan: LivePlan | null;
+
   horizon: ForecastHorizon;
   /** Operator's chosen candidate; null means "follow the recommendation". */
   selectedInterventionId: InterventionId | null;
@@ -39,6 +60,9 @@ interface TwinState {
   connect: (service: CrowdTwinService) => () => void;
   connectCongestion: (client: CongestionClient) => () => void;
   publishTelemetry: (batch: CongestionTelemetryBatch) => void;
+  evaluateLive: () => Promise<void>;
+  selectLive: (id: string) => void;
+  approveLive: () => Promise<void>;
 
   start: () => void;
   pause: () => void;
@@ -70,6 +94,15 @@ export const useTwinStore = create<TwinState>((set, get) => {
     if (service) void fn(service);
   };
   const clearDecisionUi = () => set({ selectedInterventionId: null, modifying: false, dismissedStabilizedEpoch: null });
+  const clearLive = () =>
+    set({
+      liveHistory: [],
+      liveEvaluation: null,
+      liveEvaluationStatus: "idle",
+      liveEvaluationError: null,
+      liveSelectedId: null,
+      livePlan: null,
+    });
 
   return {
     service: null,
@@ -78,6 +111,13 @@ export const useTwinStore = create<TwinState>((set, get) => {
     snapshot: null,
     congestion: null,
     congestionConnection: "connecting",
+    liveRunId: null,
+    liveHistory: [],
+    liveEvaluation: null,
+    liveEvaluationStatus: "idle",
+    liveEvaluationError: null,
+    liveSelectedId: null,
+    livePlan: null,
     horizon: 10,
     selectedInterventionId: null,
     modifying: false,
@@ -96,6 +136,7 @@ export const useTwinStore = create<TwinState>((set, get) => {
         if (snapshot.epoch !== lastEpoch) {
           lastEpoch = snapshot.epoch;
           clearDecisionUi();
+          clearLive();
           set({ congestion: null });
         }
         set({ snapshot });
@@ -112,7 +153,19 @@ export const useTwinStore = create<TwinState>((set, get) => {
       set({ congestionClient: client, congestionConnection: "connecting" });
       client.connect({
         onConnection: (congestionConnection) => set({ congestionConnection }),
-        onSnapshot: (congestion) => set({ congestion }),
+        onSnapshot: (congestion) => {
+          const zones = congestion.zones;
+          if (!zones || zones.length === 0) {
+            set({ congestion });
+            return;
+          }
+          const peak = zones.reduce((a, b) => (b.densityPerM2 > a.densityPerM2 ? b : a));
+          const point = { minute: congestion.simulationTimeSeconds / 60, density: peak.densityPerM2, zoneId: peak.zoneId };
+          const history = get().liveHistory;
+          const last = history[history.length - 1];
+          const next = last && point.minute <= last.minute ? history : [...history, point].slice(-LIVE_HISTORY_LIMIT);
+          set({ congestion, liveHistory: next });
+        },
       });
       return () => {
         client.dispose();
@@ -123,7 +176,39 @@ export const useTwinStore = create<TwinState>((set, get) => {
     publishTelemetry: (batch) => {
       const state = get();
       if (state.congestion && state.congestion.runId !== batch.runId) set({ congestion: null });
+      if (state.liveRunId !== batch.runId) {
+        clearLive();
+        set({ liveRunId: batch.runId });
+      }
       state.congestionClient?.publish(batch);
+    },
+
+    evaluateLive: async () => {
+      const runId = get().liveRunId;
+      if (!runId || get().liveEvaluationStatus === "evaluating") return;
+      set({ liveEvaluationStatus: "evaluating", liveEvaluationError: null });
+      try {
+        const evaluation = await evaluateInterventions(runId);
+        if (get().liveRunId !== runId) return;
+        set({ liveEvaluation: evaluation, liveEvaluationStatus: "idle", liveSelectedId: null });
+      } catch (error) {
+        if (get().liveRunId !== runId) return;
+        set({ liveEvaluationStatus: "error", liveEvaluationError: error instanceof Error ? error.message : String(error) });
+      }
+    },
+
+    selectLive: (id) => set({ liveSelectedId: id }),
+
+    approveLive: async () => {
+      const { liveRunId, liveEvaluation, liveSelectedId } = get();
+      const id = liveSelectedId ?? liveEvaluation?.recommendedId;
+      if (!liveRunId || !id || id === "do_nothing") return;
+      try {
+        const plan = await approveLiveIntervention(liveRunId, id);
+        if (get().liveRunId === liveRunId) set({ livePlan: plan, liveEvaluationError: null });
+      } catch (error) {
+        set({ liveEvaluationError: error instanceof Error ? error.message : String(error) });
+      }
     },
 
     start: () => call((s) => s.start()),

@@ -11,11 +11,11 @@ import type { InterventionId, InterventionOutcome, RouteId, ZoneId } from "../do
 export const SCENARIO = {
   id: "world-cup-egress",
   name: "Post-match egress · Gate B closure + metro delay",
-  duration: 24,
+  duration: 48,
   /** Fixed simulation step used for event detection (keeps results frame-rate independent). */
   step: 0.05,
   /** Scenario minutes advanced per real second at 1× playback. */
-  minutesPerSecond: 0.25,
+  minutesPerSecond: 0.1,
   speeds: [0.5, 1, 2, 4] as const,
   scripted: { gateBClosure: 3, metroDelay: 5 },
   /** Time the mock "analysis" takes after a critical forecast before a recommendation is issued. */

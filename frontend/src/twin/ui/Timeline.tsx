@@ -52,9 +52,23 @@ export function RiskTimeline({ height = 150 }: { height?: number }) {
   const minute = useTwinStore((s) => s.snapshot?.minute ?? 0);
   const duration = useTwinStore((s) => s.snapshot?.duration ?? 24);
   const events = useTwinStore((s) => s.snapshot?.events);
+  const liveHistory = useTwinStore((s) => s.liveHistory);
+  const liveForecasts = useTwinStore((s) => s.congestion?.forecasts);
+  const live = liveHistory.length >= 2;
 
   const data = useMemo(() => {
     const rows = new Map<number, Row>();
+    if (live) {
+      for (const p of liveHistory) rows.set(p.minute, { minute: p.minute, observed: p.density });
+      const last = liveHistory[liveHistory.length - 1];
+      const now = rows.get(last.minute);
+      if (now) now.forecast = last.density;
+      for (const f of liveForecasts?.filter((item) => item.zoneId === last.zoneId) ?? []) {
+        const minute = last.minute + f.horizonMinutes;
+        rows.set(minute, { minute, forecast: f.predictedDensity, band: [f.low, f.high] });
+      }
+      return [...rows.values()].sort((a, b) => a.minute - b.minute);
+    }
     for (const p of history ?? []) rows.set(p.minute, { minute: p.minute, observed: p.density });
     for (const p of projection ?? []) {
       const row = rows.get(p.minute) ?? { minute: p.minute };
@@ -63,7 +77,7 @@ export function RiskTimeline({ height = 150 }: { height?: number }) {
       rows.set(p.minute, row);
     }
     return [...rows.values()].sort((a, b) => a.minute - b.minute);
-  }, [history, projection]);
+  }, [history, projection, live, liveHistory, liveForecasts]);
 
   const markers = Object.entries(EVENT_LABEL).flatMap(([key, label]) => {
     const at = events?.[key as keyof typeof events];
@@ -149,9 +163,12 @@ export function ScenarioTriggers({ className }: { className?: string }) {
 }
 
 export function TimelinePanel() {
+  const live = useTwinStore((s) => s.liveHistory.length >= 2);
   return (
     <section aria-label="Timeline" className="flex min-w-0 flex-col gap-2 p-4">
-      <SectionTitle aside={<span className="text-[10px] text-ti-dim">Southeast Concourse · p/m²</span>}>Timeline</SectionTitle>
+      <SectionTitle aside={<span className="text-[10px] text-ti-dim">{live ? "Live peak zone · p/m²" : "Southeast Concourse · p/m²"}</span>}>
+        Timeline
+      </SectionTitle>
       <RiskTimeline height={168} />
       <ScenarioTriggers className="mt-auto flex flex-wrap gap-1.5" />
     </section>

@@ -25,15 +25,36 @@ function Metric({ label, value, unit, detail, tone }: { label: string; value: st
   );
 }
 
+function useLiveForecast(h: 5 | 10) {
+  const forecasts = useTwinStore((s) => s.congestion?.forecasts);
+  const zones = useTwinStore((s) => s.congestion?.zones);
+  if (!forecasts || forecasts.length === 0) return null;
+  const atHorizon = forecasts.filter((f) => f.horizonMinutes === h);
+  if (atHorizon.length === 0) return null;
+  const peak = atHorizon.reduce((a, b) => (b.predictedDensity > a.predictedDensity ? b : a));
+  const times = forecasts.map((f) => f.timeToCongestionMinutes).filter((t): t is number => t !== null);
+  return {
+    density: peak.predictedDensity,
+    level: peak.level,
+    zone: zones?.find((z) => z.zoneId === peak.zoneId)?.name ?? peak.zoneId,
+    method: peak.method,
+    minutesToCongestion: times.length ? Math.min(...times) : null,
+  };
+}
+
 export function RiskSummaryBlock() {
   const risk = useTwinStore((s) => s.snapshot?.risk);
   const detected = useTwinStore((s) => mostSevereCongestion(s.congestion));
   const horizon = useTwinStore((s) => s.horizon);
   const zoneName = useZoneName();
-  if (!risk) return null;
   const h = horizon === 0 ? 10 : horizon;
-  const peak = risk.predictedPeak[h];
-  const unsafe = risk.minutesToUnsafe;
+  const live = useLiveForecast(h);
+  if (!risk) return null;
+  const peak = live
+    ? { density: live.density, level: live.level, label: `${RISK_LABEL[live.level]} · ${live.zone} · ${live.method === "gbm" ? "GBM" : "baseline"}` }
+    : { density: risk.predictedPeak[h].density, level: risk.predictedPeak[h].level, label: `${RISK_LABEL[risk.predictedPeak[h].level]} · ${zoneName(risk.predictedPeak[h].zoneId)}` };
+  const unsafe = live ? live.minutesToCongestion : risk.minutesToUnsafe;
+  const unsafeThreshold = live ? "Density ≥ 3.2 p/m²" : "Density ≥ 4.5 p/m²";
   const currentLevel = detected?.level ?? risk.level;
   const currentDensity = detected?.densityPerM2 ?? risk.hotspotDensity;
   const currentLocation = detected?.label ?? zoneName(risk.hotspotZoneId);
@@ -59,14 +80,14 @@ export function RiskSummaryBlock() {
           label={`Predicted peak · ${h} min`}
           value={peak.density.toFixed(1)}
           unit="p/m²"
-          detail={`${RISK_LABEL[peak.level]} · ${zoneName(peak.zoneId)}`}
+          detail={peak.label}
           tone={riskTextClass(peak.level)}
         />
         <Metric
-          label="Until unsafe"
+          label={live ? "Until congested" : "Until unsafe"}
           value={unsafe === null ? "—" : unsafe === 0 ? "Now" : formatClock(unsafe)}
           unit={unsafe ? "min" : undefined}
-          detail={unsafe === null ? "Not forecast within 15 min" : unsafe === 0 ? "Above 4.5 p/m²" : "Density ≥ 4.5 p/m²"}
+          detail={unsafe === null ? "Not forecast" : unsafe === 0 ? `Above ${live ? "3.2" : "4.5"} p/m²` : unsafeThreshold}
           tone={unsafe !== null ? "text-vermilion-text" : undefined}
         />
         <Metric label="Est. clearance" value={String(risk.clearanceMinutes)} unit="min" detail="Until venue is clear" />

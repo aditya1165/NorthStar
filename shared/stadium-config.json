@@ -15,7 +15,7 @@
     "basePath": 0.52
   },
   "gateDefaults": {
-    "capacityPerMinute": 90,
+    "capacityPerMinute": 30,
     "approachInnerScale": 1.05,
     "approachOuterScale": 1.34,
     "approachHalfAngleDeg": 4.5

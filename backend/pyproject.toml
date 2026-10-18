@@ -9,11 +9,16 @@ description = "CrowdGuardian simulation and decision-support API"
 requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.115",
+  "numpy>=1.26",
   "pydantic>=2.10",
   "uvicorn[standard]>=0.34",
 ]
 
 [project.optional-dependencies]
+ml = [
+  "joblib>=1.4",
+  "scikit-learn>=1.5",
+]
 dev = [
   "httpx>=0.28",
   "pytest>=8.3",
