@@ -132,6 +132,8 @@ export function GateStatusBlock() {
   return (
     <section className="space-y-2">
       <SectionTitle>Gates &amp; transit</SectionTitle>
+      <p className="text-[11px] text-ti-dim">Boundary gates A–H · manual controls. A closed gate automatically sends people to the nearest open exit along the walkable outer circle. Other congestion plans need approval.</p>
+      {gates.length > 0 && gates.every((gate) => gate.status === "closed") && <p role="alert" className="text-xs text-signal-text">All boundary gates are closed. People inside must wait until you open an exit.</p>}
       <ul className="divide-y divide-ti-line rounded-md border border-ti-line">
         {gates.map((g) => {
           const closed = g.status === "closed";

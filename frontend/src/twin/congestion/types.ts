@@ -11,7 +11,9 @@ export type PersonPhase =
   | "base_ring"
   | "gate_corridor"
   | "queue"
-  | "return_to_base"
+  | "return_to_concourse"
+  | "concourse"
+  | "gate_approach"
   | "exit";
 
 export interface PersonTelemetry {
@@ -79,6 +81,8 @@ export interface RoutingUpdate {
   gateWaitSeconds: Partial<Record<GateId, number | null>>;
   redirectedTotal: number;
   activePlanId: string | null;
+  /** Redirect destination closed; another explicit approval is needed to resume it. */
+  redirectSuspended?: boolean;
 }
 
 export interface LiveZoneState {

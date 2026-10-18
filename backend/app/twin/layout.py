@@ -40,9 +40,11 @@ SECTION_ANGLES = np.array([-30.0 + 15.0 * k for k in range(SECTION_COUNT)])
 FIRST_SECTION_NUMBER = 201
 
 DESTINATION_SCALE = 1.62
-QUEUE_INNER_SCALE = 1.07
-QUEUE_OUTER_SCALE = 1.28
-GATE_PORTAL_SCALE = 1.32
+MOVEMENT = STADIUM["movement"]
+CONCOURSE_SCALE = float(MOVEMENT["concourseScale"])
+QUEUE_INNER_SCALE = float(MOVEMENT["queueInnerScale"])
+QUEUE_OUTER_SCALE = float(MOVEMENT["queueOuterScale"])
+GATE_PORTAL_SCALE = RING["concourseOuter"] + float(MOVEMENT["gatePortalOffset"])
 
 
 def ring_point(angle_deg: float, scale: float) -> tuple[float, float]:
@@ -63,10 +65,49 @@ def angle_delta(a: np.ndarray | float, b: np.ndarray | float) -> np.ndarray:
     return np.where(d <= -180.0, d + 360.0, d)
 
 
+SECTION_ACCESS_GATE_ANGLES = GATE_ANGLES[
+    np.argmin(np.abs(angle_delta(SECTION_ANGLES[:, None], GATE_ANGLES[None, :])), axis=1)
+]
+
+
+def initial_access_angles(person_ids: np.ndarray) -> np.ndarray:
+    """Fixed section-passage angles for live telemetry and restored people.
+
+    With this stadium's 15-degree sections and 45-degree gates, the seat jitter
+    of +/-5.5 degrees cannot cross the nearest-passage boundary (7.5 degrees).
+    """
+    return SECTION_ACCESS_GATE_ANGLES[np.asarray(person_ids, dtype=np.int64) % SECTION_COUNT]
+
+
+def nearest_open_gate(
+    angles: np.ndarray, person_ids: np.ndarray, closed: np.ndarray
+) -> np.ndarray:
+    """Nearest circular escape, stably splitting equal-distance choices by ID.
+
+    Gate indices provide a stable ordering for exact ties. No open gate returns
+    -1, allowing pedestrians to wait safely without changing their destination.
+    """
+    person_ids = np.asarray(person_ids, dtype=np.int64)
+    if person_ids.size == 0 or np.all(closed):
+        return np.full(person_ids.size, -1, dtype=np.int64)
+    distances = np.abs(angle_delta(np.asarray(angles)[:, None], GATE_ANGLES[None, :]))
+    distances[:, closed] = np.inf
+    tied = np.abs(distances - distances.min(axis=1)[:, None]) <= 1e-6
+    chosen_rank = person_ids % tied.sum(axis=1)
+    selected = tied & (np.cumsum(tied, axis=1) == chosen_rank[:, None] + 1)
+    return np.argmax(selected, axis=1)
+
+
 def base_path_meters(angle_from: np.ndarray | float, angle_to: np.ndarray | float) -> np.ndarray:
     """Walking distance along the lower base path between two angles."""
     radians = np.abs(angle_delta(angle_from, angle_to)) * pi / 180
     return radians * MEAN_RADIUS * BASE_SCALE * METERS_PER_SCENE_UNIT
+
+
+def concourse_path_meters(angle_from: np.ndarray | float, angle_to: np.ndarray | float) -> np.ndarray:
+    """Walking distance along the outer circulation ring between boundary gates."""
+    radians = np.abs(angle_delta(angle_from, angle_to)) * pi / 180
+    return radians * MEAN_RADIUS * CONCOURSE_SCALE * METERS_PER_SCENE_UNIT
 
 
 GATE_DESTINATIONS = np.array([ring_point(angle, DESTINATION_SCALE) for angle in GATE_ANGLES])

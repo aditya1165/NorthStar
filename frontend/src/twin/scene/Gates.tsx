@@ -4,7 +4,8 @@ import * as THREE from "three";
 
 import { DEG, ringPoint } from "../domain/geometry";
 import type { GateId, VenueLayout } from "../domain/types";
-import { previewIntervention, useTwinStore } from "../state/twinStore";
+import { useTwinStore } from "../state/twinStore";
+import { GATE_PORTAL_SCALE } from "../sim/paths";
 import { PALETTE, RISK_COLOR } from "../ui/palette";
 
 const GATE_WIDTH = 1.9;
@@ -17,13 +18,12 @@ function Gate({ venue, id, reducedMotion }: { venue: VenueLayout; id: GateId; re
   const strip = useRef<THREE.MeshBasicMaterial>(null);
   const pulse = useRef<THREE.Mesh>(null);
   const pulseMat = useRef<THREE.MeshBasicMaterial>(null);
-  const planned = useRef<THREE.Mesh>(null);
   const last = useRef<{ state: string | null; epoch: number; changedAt: number }>({ state: null, epoch: -1, changedAt: -10 });
   const tmp = useMemo(() => new THREE.Color(), []);
 
   const { position, rotation } = useMemo(() => {
     const { rx, rz } = venue.bowl;
-    const [x, z] = ringPoint(rx, rz, layout.angleDeg, venue.ring.concourseOuter + 0.011);
+    const [x, z] = ringPoint(rx, rz, layout.angleDeg, GATE_PORTAL_SCALE);
     const a = layout.angleDeg * DEG;
     // Tangent of the ellipse; the gate spans along it.
     const tx = -Math.sin(a) * rx;
@@ -71,15 +71,6 @@ function Gate({ venue, id, reducedMotion }: { venue: VenueLayout; id: GateId; re
       }
     }
 
-    if (planned.current) {
-      const preview = previewIntervention(store);
-      const show = id === "gate_c" && closed && Boolean(preview?.opensGateC);
-      planned.current.visible = show;
-      if (show) {
-        const mat = planned.current.material as THREE.MeshBasicMaterial;
-        mat.opacity = reducedMotion ? 0.5 : 0.35 + 0.2 * Math.sin(now * 2.6);
-      }
-    }
   });
 
   return (
@@ -106,10 +97,6 @@ function Gate({ venue, id, reducedMotion }: { venue: VenueLayout; id: GateId; re
       <mesh ref={pulse} rotation-x={-Math.PI / 2} position-y={0.05} visible={false}>
         <ringGeometry args={[1.1, 1.25, 48]} />
         <meshBasicMaterial ref={pulseMat} transparent opacity={0} depthWrite={false} color={PALETTE.orange} />
-      </mesh>
-      <mesh ref={planned} rotation-x={-Math.PI / 2} position-y={0.04} visible={false}>
-        <ringGeometry args={[1.35, 1.5, 48]} />
-        <meshBasicMaterial transparent opacity={0.4} depthWrite={false} color={PALETTE.green} />
       </mesh>
     </group>
   );

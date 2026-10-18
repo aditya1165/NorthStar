@@ -16,7 +16,8 @@ GateId = Literal[
 ]
 MovementState = Literal["waiting", "moving", "queued", "exiting", "transit_wait"]
 PhaseName = Literal[
-    "waiting", "row", "aisle", "base_ring", "gate_corridor", "queue", "return_to_base", "exit"
+    "waiting", "row", "aisle", "base_ring", "gate_corridor", "queue", "return_to_base",
+    "return_to_concourse", "concourse", "gate_approach", "exit"
 ]
 
 
@@ -80,6 +81,7 @@ class RoutingUpdate(BaseModel):
     gate_wait_seconds: dict[str, float | None]
     redirected_total: int
     active_plan_id: str | None = None
+    redirect_suspended: bool = False
 
 
 class LiveZoneState(BaseModel):

@@ -231,14 +231,17 @@ async function main() {
   const detected = await submit(1, detectedAt);
   assert.equal(detected.gates.find((gate) => gate.gate_id === queuedGate.id).congested, true,
     'Persistent Gate B congestion was not detected');
+  assert.deepEqual(detected.routing.assignments, [], 'Congestion must not authorize a routing plan');
+  assert.deepEqual(detected.routing.holds, [], 'Unapproved release holds are forbidden');
   console.log('PASS 4,000-person telemetry, eight gates, 12 zones, 24 forecasts, and persistent congestion');
 
   const closure = await submit(2, detectedAt + 31, [queuedGate.id]);
   assert.equal(closure.routing.gate_wait_seconds[queuedGate.id], null, 'Closed gate must be unavailable');
-  const reroutes = closure.routing.assignments.filter((assignment) => assignment.reason === 'gate_closed');
-  assert.ok(reroutes.length > 0, 'Closing Gate B must reroute people assigned to it');
-  assert.ok(closure.routing.assignments.every((assignment) => assignment.to_gate !== queuedGate.id),
-    'No routing assignment may send a person to a closed gate');
+  assert.ok(closure.routing.assignments.length > 0, 'A closed gate must trigger nearest-open exit escape');
+  assert.ok(closure.routing.assignments.every((assignment) => assignment.reason === 'gate_closed' && assignment.to_gate !== queuedGate.id),
+    'Only closed-door escape is automatic; no assignment may target the closed gate');
+  assert.deepEqual(closure.routing.holds, [], 'Unapproved release holds are forbidden');
+  assert.equal(closure.routing.active_plan_id, null);
   assert.equal(closure.zones.find((zone) => zone.gate_id === queuedGate.id).status, 'closed');
   congestion.close();
 
@@ -247,7 +250,7 @@ async function main() {
   assert.equal(exported.run_id, runId);
   assert.equal(exported.timeline.length, 3);
   assert.ok(exported.people_redirected > 0);
-  console.log(`PASS closed-gate rerouting (${reroutes.length} assignments) and live-run export`);
+  console.log('PASS automatic closed-door escape, no unapproved congestion plan, and live-run export');
   console.log(`NorthStar Docker smoke test passed. Isolated in-memory run: ${runId}`);
 }
 

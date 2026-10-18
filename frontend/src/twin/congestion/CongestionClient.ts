@@ -44,6 +44,7 @@ interface WireRouting {
   gate_wait_seconds: Partial<Record<GateId, number | null>>;
   redirected_total: number;
   active_plan_id: string | null;
+  redirect_suspended?: boolean;
 }
 
 interface WireZone {
@@ -117,6 +118,7 @@ function routingUpdate(value: WireRouting): RoutingUpdate {
     gateWaitSeconds: value.gate_wait_seconds,
     redirectedTotal: value.redirected_total,
     activePlanId: value.active_plan_id,
+    redirectSuspended: value.redirect_suspended ?? false,
   };
 }
 

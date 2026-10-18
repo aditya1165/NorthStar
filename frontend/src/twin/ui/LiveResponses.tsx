@@ -1,4 +1,4 @@
-import { AlertTriangle, Check, CircleCheck, Download, FlaskConical, Loader2 } from "lucide-react";
+import { AlertTriangle, Check, CircleCheck, Download, Loader2 } from "lucide-react";
 
 import { cn } from "../../lib/cn";
 import { formatClock, levelForDensity } from "../domain/risk";
@@ -72,11 +72,17 @@ export function LiveResponsePanel() {
   const error = useTwinStore((s) => s.liveEvaluationError);
   const selectedId = useTwinStore((s) => s.liveSelectedId);
   const plan = useTwinStore((s) => s.livePlan);
+  const redirectSuspended = useTwinStore((s) => s.congestion?.routing?.redirectSuspended ?? false);
+  const connection = useTwinStore((s) => s.congestionConnection);
+  const approving = useTwinStore((s) => s.liveApprovalPending);
+  const message = useTwinStore((s) => s.liveApprovalMessage);
   const redirected = useTwinStore((s) => s.congestion?.routing?.redirectedTotal ?? 0);
-  const { evaluateLive, approveLive } = useTwinStore.getState();
+  const { selectLive, approveLive } = useTwinStore.getState();
   const chosenId = selectedId ?? evaluation?.recommendedId ?? null;
   const chosen = evaluation?.candidates.find((c) => c.interventionId === chosenId) ?? null;
   const evaluating = status === "evaluating";
+  const locked = connection !== "connected" || approving;
+  const disabledReason = connection !== "connected" ? "Connect to Python to review and approve routes." : !chosen ? "Waiting for an automatic evaluation of the current boundary gates." : !chosen.feasible ? chosen.rejectionReason : null;
 
   return (
     <section aria-label="Intervention comparison" className="grid min-w-0 gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_260px]">
@@ -86,7 +92,7 @@ export function LiveResponsePanel() {
             <span className="text-[10px] text-ti-dim">
               {evaluation
                 ? `Python rollouts · ${evaluation.seeds.length} seeds × ${evaluation.complianceLevels.length} compliance · ${evaluation.horizonMinutes} min`
-                : `Python routing live · ${redirected.toLocaleString()} redirected`}
+                : `Python-issued assignments · ${redirected.toLocaleString()} people`}
             </span>
           }
         >
@@ -103,7 +109,7 @@ export function LiveResponsePanel() {
               <span>Risk Δ · moved</span>
             </div>
             {evaluation.candidates.map((candidate) => (
-              <CandidateRow key={candidate.interventionId} candidate={candidate} selected={chosenId === candidate.interventionId} locked={Boolean(plan)} />
+              <CandidateRow key={candidate.interventionId} candidate={candidate} selected={chosenId === candidate.interventionId} locked={locked} />
             ))}
           </div>
         ) : (
@@ -111,7 +117,7 @@ export function LiveResponsePanel() {
             <p className="max-w-sm text-xs text-ti-dim">
               {evaluating
                 ? "Running isolated counterfactual rollouts from the latest telemetry…"
-                : "Evaluate responses to simulate candidate plans from the current crowd state."}
+                : "Start the simulation to evaluate boundary-gate congestion automatically."}
             </p>
           </div>
         )}
@@ -124,7 +130,8 @@ export function LiveResponsePanel() {
             <CircleCheck size={16} className="mt-0.5 shrink-0 text-mineral-text" aria-hidden />
             <div>
               <p className="text-sm font-medium text-warm">{plan.name}</p>
-              <p className="text-xs text-ti-text">Approved at T+{formatClock(plan.approvedAtSeconds / 60)} · executing via Python routing</p>
+              <p className="text-xs text-ti-text">Approved at T+{formatClock(plan.approvedAtSeconds / 60)} · {redirectSuspended ? "reroute suspended after gate closure" : "executing via Python routing"}</p>
+              {redirectSuspended && <p className="text-[11px] text-signal-text">Closed-gate escape remains active. Approve a new plan to resume optional rerouting.</p>}
               <ul className="mt-1 list-disc pl-4 text-[11px] text-ti-text">
                 {plan.actions.map((action) => (
                   <li key={action}>{action}</li>
@@ -135,22 +142,31 @@ export function LiveResponsePanel() {
         ) : evaluation ? (
           <p className="text-xs leading-5 text-ti-text">{evaluation.rationale}</p>
         ) : (
-          <p className="text-xs leading-5 text-ti-dim">Python routing is reassigning people automatically. Evaluate to compare operator responses.</p>
+          <p className="text-xs leading-5 text-ti-dim">Closed-gate detours happen automatically. You control gates A–H and approve optional congestion-management plans.</p>
         )}
+        {chosen && (
+          <div className="text-xs text-ti-text">
+            <p className="font-medium text-warm">Proposed: {chosen.name}</p>
+            <ul className="mt-1 list-disc pl-4">{chosen.actions.map((action) => <li key={action}>{action}</li>)}</ul>
+          </div>
+        )}
+        <p role="status" className="text-[11px] text-ti-dim">
+          {selectedId ? "Review pinned · this exact response stays selected until you approve or resume recommendations." : evaluating ? "Updating recommendations…" : evaluation ? "Automatic evaluation is up to date." : disabledReason}
+        </p>
+        {message && <p className="text-[11px] text-mineral-text">{message}</p>}
         {error && <p className="text-[11px] text-signal-text">{error}</p>}
         <div className="mt-auto flex flex-wrap gap-2">
-          <button type="button" className="cg-btn flex-1 whitespace-nowrap" disabled={evaluating || !runId} onClick={() => void evaluateLive()}>
-            {evaluating ? <Loader2 size={14} className="animate-spin" aria-hidden /> : <FlaskConical size={14} aria-hidden />}
-            {evaluation ? "Re-evaluate" : "Evaluate responses"}
-          </button>
-          {evaluation && !plan && (
+          {selectedId && <button type="button" className="cg-btn" disabled={approving} onClick={() => selectLive(null)}>Resume recommendations</button>}
+          {evaluation && (
             <button
               type="button"
               className="cg-btn-primary flex-1 whitespace-nowrap"
-              disabled={!chosen || !chosen.feasible || chosen.interventionId === "do_nothing"}
+              disabled={locked || !chosen || !chosen.feasible}
+              aria-describedby={disabledReason ? "approval-disabled-reason" : undefined}
               onClick={() => void approveLive()}
             >
-              <Check size={16} aria-hidden /> Approve
+              {approving ? <Loader2 size={16} className="animate-spin" aria-hidden /> : <Check size={16} aria-hidden />}
+              {approving ? "Approving…" : chosen?.interventionId === "do_nothing" ? plan ? "Stop active plan" : "Keep current routes" : "Approve"}
             </button>
           )}
           {runId && (
@@ -159,6 +175,7 @@ export function LiveResponsePanel() {
             </a>
           )}
         </div>
+        {disabledReason && evaluation && <p id="approval-disabled-reason" className="text-[11px] text-ti-dim">{disabledReason}</p>}
       </div>
     </section>
   );

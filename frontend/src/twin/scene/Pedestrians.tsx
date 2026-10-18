@@ -26,7 +26,7 @@ export function Pedestrians({ venue, count }: { venue: VenueLayout; count: numbe
   const field = useMemo(() => new CrowdField(venue, count), [venue, count]);
   const prevColor = useMemo(() => new Uint8Array(count).fill(255), [count]);
   const sync = useRef({ epoch: -1, snapMinute: -1, snapAt: 0, rate: 0 });
-  const telemetry = useRef({ epoch: -1, sequence: 0, sentAt: -Infinity, minute: -1 });
+  const telemetry = useRef({ epoch: -1, sequence: 0, sentAt: -Infinity, minute: -1, gateKey: "", nonce: -1 });
   const appliedRouting = useRef({ runId: "", sequence: -1 });
 
   const geometry = useMemo(() => {
@@ -60,10 +60,10 @@ export function Pedestrians({ venue, count }: { venue: VenueLayout; count: numbe
     const s = sync.current;
     const now = performance.now();
     const runId = `${venue.id}:${SESSION_ID}:${snapshot.epoch}`;
+    const closedGates = snapshot.gates.filter((gate) => gate.status === "closed").map((gate) => gate.id);
     const routing = congestion?.runId === runId ? congestion.routing : undefined;
     if (snapshot.epoch !== s.epoch || snapshot.minute < s.snapMinute - 1e-6) {
       // Reset / jump: rebuild deterministically and fast-forward to the snapshot time.
-      field.routingMode = "local";
       field.reset(0);
       field.advanceTo(snapshot.minute, snapshot, congestion);
       s.epoch = snapshot.epoch;
@@ -80,10 +80,10 @@ export function Pedestrians({ venue, count }: { venue: VenueLayout; count: numbe
       s.snapAt = now;
     }
 
-    // Python owns routing while connected; fall back to local routing otherwise.
-    field.routingMode = routing && store.congestionConnection === "connected" ? "backend" : "local";
+    // Optional congestion plans require approval. Closed-gate escape is handled
+    // immediately by the field, including while the backend is disconnected.
     if (routing && congestion && (appliedRouting.current.runId !== runId || appliedRouting.current.sequence !== congestion.sequence)) {
-      field.applyAssignments(routing.assignments);
+      field.applyAssignments(routing.assignments, new Set(closedGates));
       field.setHolds(routing.holds);
       appliedRouting.current = { runId, sequence: congestion.sequence };
     }
@@ -101,19 +101,23 @@ export function Pedestrians({ venue, count }: { venue: VenueLayout; count: numbe
       stream.sentAt = -Infinity;
       stream.minute = -1;
     }
-    if (count === TOTAL_POPULATION && field.time !== stream.minute && now - stream.sentAt >= TELEMETRY_INTERVAL_MS) {
+    const gateKey = closedGates.join(",");
+    const urgent = stream.gateKey !== gateKey || stream.nonce !== store.telemetryNonce;
+    if (count === TOTAL_POPULATION && (urgent || (field.time !== stream.minute && now - stream.sentAt >= TELEMETRY_INTERVAL_MS))) {
       const sample = field.telemetry();
       useTwinStore.getState().publishTelemetry({
         runId,
         sequence: stream.sequence,
         simulationTimeSeconds: Math.max(0, field.time * 60),
         population: TOTAL_POPULATION,
-        closedGates: snapshot.gates.filter((gate) => gate.status === "closed").map((gate) => gate.id),
+        closedGates,
         ...sample,
       });
       stream.sequence += 1;
       stream.sentAt = now;
       stream.minute = field.time;
+      stream.gateKey = gateKey;
+      stream.nonce = store.telemetryNonce;
     }
 
     if (!visible) return;

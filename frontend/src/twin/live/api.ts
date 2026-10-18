@@ -23,9 +23,11 @@ export interface LiveCandidate {
   riskReductionPercent: number;
   secondaryBottleneck: GateId | null;
   operationalComplexity: number;
+  redirectGate: GateId | null;
 }
 
 export interface LiveEvaluation {
+  evaluationId: string;
   runId: string;
   evaluatedAtSeconds: number;
   hotspotGate: GateId;
@@ -67,9 +69,11 @@ interface WireCandidate {
   risk_reduction_percent: number;
   secondary_bottleneck: GateId | null;
   operational_complexity: number;
+  plan: { redirect_gate: GateId | null };
 }
 
 interface WireEvaluation {
+  evaluation_id: string;
   run_id: string;
   evaluated_at_seconds: number;
   hotspot_gate: GateId;
@@ -83,7 +87,10 @@ interface WireEvaluation {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${apiBaseUrl()}${path}`, init);
+  const response = await fetch(`${apiBaseUrl()}${path}`, {
+    ...init,
+    signal: init?.signal ?? AbortSignal.timeout(120_000),
+  });
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as { detail?: string } | null;
     throw new Error(body?.detail ?? `Request failed (${response.status})`);
@@ -93,6 +100,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export function parseEvaluation(wire: WireEvaluation): LiveEvaluation {
   return {
+    evaluationId: wire.evaluation_id,
     runId: wire.run_id,
     evaluatedAtSeconds: wire.evaluated_at_seconds,
     hotspotGate: wire.hotspot_gate,
@@ -123,6 +131,7 @@ export function parseEvaluation(wire: WireEvaluation): LiveEvaluation {
       riskReductionPercent: c.risk_reduction_percent,
       secondaryBottleneck: c.secondary_bottleneck,
       operationalComplexity: c.operational_complexity,
+      redirectGate: c.plan.redirect_gate,
     })),
   };
 }
@@ -134,7 +143,7 @@ export async function evaluateInterventions(runId: string): Promise<LiveEvaluati
   return parseEvaluation(wire);
 }
 
-export async function approveIntervention(runId: string, interventionId: string): Promise<LivePlan> {
+export async function approveIntervention(runId: string, interventionId: string, evaluationId: string): Promise<LivePlan> {
   const wire = await request<{
     run_id: string;
     intervention_id: string;
@@ -143,6 +152,8 @@ export async function approveIntervention(runId: string, interventionId: string)
     actions: string[];
   }>(`/api/runs/${encodeURIComponent(runId)}/interventions/${encodeURIComponent(interventionId)}/approve`, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ evaluation_id: evaluationId }),
   });
   return {
     runId: wire.run_id,

@@ -64,7 +64,6 @@ interface EngineState {
   /** Sub-step remainder so playback is frame-rate independent. */
   carry: number;
   closedGates: Set<GateId>;
-  scriptedGateBHandled: boolean;
 }
 
 function initialState(epoch: number, speed: number): EngineState {
@@ -79,7 +78,6 @@ function initialState(epoch: number, speed: number): EngineState {
     interventions: [],
     carry: 0,
     closedGates: new Set(),
-    scriptedGateBHandled: false,
   };
 }
 
@@ -142,7 +140,6 @@ export class MockScenarioEngine {
     if (status === "closed") this.state.closedGates.add(gateId);
     else this.state.closedGates.delete(gateId);
     if (gateId === "gate_b") {
-      this.state.scriptedGateBHandled = true;
       this.state.events.gateBClosedAt = status === "closed" ? snap(this.state.minute) : null;
     }
   }
@@ -171,7 +168,6 @@ export class MockScenarioEngine {
     if (kind === "gate_b_closure" && this.state.events.gateBClosedAt === null) {
       this.state.events.gateBClosedAt = at;
       this.state.closedGates.add("gate_b");
-      this.state.scriptedGateBHandled = true;
     }
     if (kind === "metro_delay" && this.state.events.metroDelayedAt === null) this.state.events.metroDelayedAt = at;
   }
@@ -200,11 +196,6 @@ export class MockScenarioEngine {
     s.minute = snap(s.minute + SCENARIO.step);
     const t = s.minute;
 
-    if (!s.scriptedGateBHandled && t >= SCENARIO.scripted.gateBClosure) {
-      s.events.gateBClosedAt = SCENARIO.scripted.gateBClosure;
-      s.closedGates.add("gate_b");
-      s.scriptedGateBHandled = true;
-    }
     if (s.events.metroDelayedAt === null && t >= SCENARIO.scripted.metroDelay) s.events.metroDelayedAt = SCENARIO.scripted.metroDelay;
 
     const events = this.modelEvents();

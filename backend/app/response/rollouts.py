@@ -7,9 +7,10 @@ never mutated; the operator's approval is what applies a plan.
 
 from collections import Counter
 from dataclasses import dataclass
+from uuid import uuid4
 
 import numpy as np
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.congestion.config import THRESHOLDS
 from app.routing.engine import RoutingPlan
@@ -67,6 +68,7 @@ class CandidateResult(BaseModel):
 
 
 class InterventionEvaluation(BaseModel):
+    evaluation_id: str = Field(default_factory=lambda: str(uuid4()))
     run_id: str
     evaluated_at_seconds: float
     hotspot_gate: str
@@ -96,7 +98,7 @@ def risk_index(metrics: RunMetrics) -> float:
 
 def _run(state: LiveState, seed: int, plan: RoutingPlan | None, horizon: float) -> RunMetrics:
     twin = restore_twin(state, rollout_seed=seed)
-    runner = TwinRunner(twin, policy="engine", plan=plan)
+    runner = TwinRunner(twin, policy="operator", plan=plan)
     end = twin.time + horizon
     while twin.time < end - 1e-6:
         runner.run_until(min(end, twin.time + 1.0))
@@ -161,9 +163,9 @@ class CounterfactualEvaluator:
         candidates = [
             _Candidate(
                 "do_nothing",
-                "Do nothing",
-                "Keep automatic per-person routing only.",
-                ["Continue automatic Python routing"],
+                "Keep current routes",
+                "Keep open gate assignments; use the nearest open boundary exit if a gate closes.",
+                ["Keep open gate assignments", "Automatically bypass closed exits along the outer concourse", "Stop optional routing plan and release holds", "Leave gate controls unchanged"],
                 1,
                 PlanSpec(),
             )
@@ -266,7 +268,7 @@ class CounterfactualEvaluator:
                 f" {len(rejected)} candidate(s) rejected for secondary bottlenecks." if rejected else ""
             )
             rationale = (
-                "No candidate meaningfully beats automatic routing; keep monitoring." + reason
+                "No candidate meaningfully improves nearest-open exit routing; keep monitoring." + reason
             )
         recommended.recommended = True
         return InterventionEvaluation(

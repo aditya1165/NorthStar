@@ -82,8 +82,13 @@ class ZoneAggregator:
         speed_mps: np.ndarray,
         target_gate: np.ndarray,
         closed_gates: set[str] | None = None,
+        *,
+        queued_mask: np.ndarray | None = None,
     ) -> list[ZoneTelemetry]:
         closed_gates = closed_gates or set()
+        # Explicit simulation state distinguishes slow circulation from waiting.
+        # Speed fallback preserves callers using older telemetry without phases.
+        queued = speed_mps <= QUEUE_SPEED_MPS if queued_mask is None else queued_mask
         n_zones = len(ZONES)
         current = np.full(self.population, -1, dtype=np.int16)
         member = zone_membership(x, z)
@@ -122,9 +127,9 @@ class ZoneAggregator:
             speeds = speed_mps[inside]
             if zone.gate_id is not None:
                 gate = GATE_INDEX[zone.gate_id]
-                queue = int(np.count_nonzero(inside & (target_gate == gate) & (speed_mps <= QUEUE_SPEED_MPS)))
+                queue = int(np.count_nonzero(inside & (target_gate == gate) & queued))
             else:
-                queue = int(np.count_nonzero(speeds <= QUEUE_SPEED_MPS))
+                queue = int(np.count_nonzero(inside & queued))
             moving = turning[inside]
             moving = moving[np.isfinite(moving) & (np.abs(moving) > 0.05)]
             clockwise = int(np.count_nonzero(moving > 0))

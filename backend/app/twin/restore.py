@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from app.twin.field import PHASE_BY_NAME, Phase, StadiumTwin, TwinParams
-from app.twin.layout import BASE_SCALE, GATE_ANGLES, GATE_IDS, GATE_INDEX, POPULATION, ring_coords
+from app.twin.layout import BASE_SCALE, GATE_IDS, GATE_INDEX, POPULATION, ring_coords
 
 MOVEMENT_FALLBACK = {
     "waiting": Phase.WAITING,
@@ -98,6 +98,7 @@ def restore_twin(state: LiveState, rollout_seed: int = 0, speed_noise: float = 0
     twin.target[ids] = state.target
     twin.x[ids] = state.x
     twin.z[ids] = state.z
+    twin.speed_mps[ids] = state.speed_mps
     angle, scale = ring_coords(state.x, state.z)
     twin.angle[ids] = angle
     twin.scale[ids] = scale
@@ -106,8 +107,6 @@ def restore_twin(state: LiveState, rollout_seed: int = 0, speed_noise: float = 0
 
     ring = ids[state.phase == Phase.BASE_RING]
     twin.scale[ring] = BASE_SCALE
-    corridor = ids[np.isin(state.phase, (Phase.GATE_CORRIDOR, Phase.QUEUE))]
-    twin.angle[corridor] = GATE_ANGLES[twin.target[corridor]]
 
     queued = ids[state.phase == Phase.QUEUE]
     order = queued[np.lexsort((queued, scale[state.phase == Phase.QUEUE]))]
@@ -115,6 +114,8 @@ def restore_twin(state: LiveState, rollout_seed: int = 0, speed_noise: float = 0
     for person in order.tolist():
         twin.queues[int(twin.target[person])].append(person)
 
-    for person in ids[state.phase == Phase.EXIT].tolist():
+    for person in ids[state.phase == Phase.GATE_APPROACH].tolist():
         twin._begin_exit(person)
+    for person in ids[state.phase == Phase.EXIT].tolist():
+        twin._begin_outside_walk(person)
     return twin

@@ -4,7 +4,7 @@
 
 The match ends. 4,000 people stand up at once and head for eight exits. One gate closes, another starts backing up, and an operator has a few seconds to decide what to do.
 
-North Star is a human-in-the-loop stadium crowd-management prototype built around that moment. The current application simulates exactly 4,000 people leaving a fictional stadium through eight controllable exits, streams every person's state to Python, detects persistent gate congestion, and reroutes affected people using an explainable deterministic cost function.
+North Star is a human-in-the-loop stadium crowd-management prototype built around that moment. It simulates exactly 4,000 people leaving a fictional stadium through eight controllable boundary exits, streams every person's state to Python, detects persistent gate congestion, and suggests responses. People automatically bypass a closed gate via the nearest open door along the outer concourse; optional congestion-management plans require operator approval. Only the operator opens or closes gates.
 
 > [!WARNING]
 > The project is intentionally a decision-support demonstrator. It is not certified evacuation software and must not be presented as guaranteed public-safety guidance.
@@ -14,13 +14,13 @@ North Star is a human-in-the-loop stadium crowd-management prototype built aroun
 | | |
 | --- | --- |
 | **Population** | Exactly 4,000 stable logical person identities per simulation run |
-| **Exits** | Eight controllable gates, Gate A through Gate H |
+| **Exits** | Eight controllable boundary gates, Gate A through Gate H; distinct from section access passages |
 | **Seating** | Twenty-four seating sections |
 | **Telemetry** | Complete per-person snapshot from React to FastAPI once per real second |
 | **Detection** | Python-owned gate density, queue, speed, throughput, persistence, and clearing |
-| **Rerouting** | Deterministic and explainable; currently applied in the browser |
-| **Forecasts and interventions** | Mock or formula-driven in the default 3D experience |
-| **Status** | Hybrid prototype: movement and congestion are integrated; forecasting and intervention planning are only partially connected |
+| **Rerouting** | Automatic nearest-open escape from closed doors; optional Python congestion plans require approval |
+| **Forecasts and interventions** | Live Python zone forecasts and counterfactual rollouts; some presentation panels retain scripted fallbacks |
+| **Status** | Integrated simulation-to-decision prototype; not calibrated or certified for real evacuation decisions |
 
 ## Contents
 
@@ -44,25 +44,26 @@ North Star is a human-in-the-loop stadium crowd-management prototype built aroun
 
 ## 🧱 Current status
 
-The repository is a hybrid prototype: the movement and congestion path is integrated, while forecasting and intervention planning are only partially connected.
+The person movement, gate detection, Python forecasts, counterfactual evaluation, and operator approval loop are connected. Some narrative/visual forecast panels remain scripted; this is not a calibrated real-world evacuation model.
 
 | Area | State | Where |
 | --- | --- | --- |
 | 4,000-person movement, gate queues, operator gate control | ✅ Implemented and connected | React `CrowdField` |
 | Live per-gate congestion detection | ✅ Implemented and connected | FastAPI `CongestionDetector` over `/ws/congestion` |
-| Deterministic rerouting | ✅ Implemented and connected, browser-owned | React `CrowdField` |
-| Mass-balance forecast baseline | 🟡 Real algorithm, not connected to the 3D stream | `backend/app/forecasting/baseline.py` |
-| Synthetic zone-level simulation | 🟡 Real, exposed over REST only | `backend/app/simulation/` |
-| Scenario clock, forecasts, interventions in the 3D page | ⚪ Mocked | `MockTwinService`, `MockScenarioEngine` |
-| Python `ResponseService` | ⚪ Formula-based placeholder | `backend/app/response/` |
-| Python-owned routing, live forecasts, dataset, ML, rollouts | ⏳ Pending | See below and the roadmap |
+| Closed-door escape and outer-concourse circulation | ✅ Implemented locally and in Python | React `CrowdField`, Python `StadiumTwin` and `RoutingEngine` |
+| Live 5- and 10-minute mass-balance forecasts | ✅ Connected to per-person zone histories | `backend/app/live/forecast.py`, `backend/app/forecasting/baseline.py` |
+| Counterfactual evaluation and explicit approval | ✅ Connected; exact evaluation ID required | `backend/app/response/rollouts.py`, live registry and `LiveResponsePanel` |
+| Synthetic zone-level simulation | 🟡 Separate legacy REST/WebSocket demo | `backend/app/simulation/` |
+| Scenario clock and remaining presentation fixtures | ⚪ Scripted; not the live decision engine | `MockTwinService`, `MockScenarioEngine` |
+| Legacy Python `ResponseService` | ⚪ Formula-based placeholder, separate from live rollouts | `backend/app/response/` |
+| Validated dataset, trained forecasting model, calibration | ⏳ Pending | See below and the roadmap |
 
 ### Implemented and connected
 
 - Existing 3D React stadium design rendered with React Three Fiber and Three.js.
 - Exactly 4,000 stable logical person identities per simulation run.
 - Twenty-four seating sections and eight exits, Gate A through Gate H.
-- Explicit movement through the seat row, section aisle, lower base path, gate corridor, FIFO queue, and exterior exit path.
+- Explicit movement through seat row, section aisle, lower base path, access passage, outer circular concourse, boundary-gate queue, doorway, and exterior path.
 - Capacity-limited queues at every gate.
 - Individual operator control to open or close any gate.
 - Permanent removal after a person exits; an exited ID cannot reappear during the run.
@@ -71,39 +72,37 @@ The repository is a hybrid prototype: the movement and congestion path is integr
 - Python-owned gate density, queue, speed, throughput, persistence, and clearing calculations.
 - Live congestion presentation in the existing incident strip, risk summary, gate list, header, and 3D gate treatment.
 - Automatic WebSocket reconnect and an explicit detector-unavailable state.
-- Deterministic rerouting away from closed or backend-confirmed congested gates.
+- Automatic Python evaluations with suggested actions; optional congestion plans and release holds require operator approval.
+- Closing a gate immediately disperses affected pedestrians toward the nearest open boundary gate, even if Python is unavailable.
+- Closed-gate escape and approved diversions use the continuous outer walking lane, never return through the seating bowl, and never teleport.
+- Closed boundary gates block everyone still inside, including people already released from the queue. People already outside may finish walking away.
 - Shared stadium geometry consumed by both TypeScript and Python.
 - Unit, API, browser, build, lint, and Docker Compose checks.
 
-### Real algorithms that are not connected to the 3D stream yet
+### Live evaluation and legacy demo
 
-- The backend contains an explainable mass-balance forecast baseline in `backend/app/forecasting/baseline.py`.
-- The backend exposes REST endpoints for a separate synthetic zone-level simulation.
-- Those REST forecasts operate on the synthetic backend snapshot, not on the default 3D application's per-person telemetry.
+- The live registry aggregates per-person telemetry into 12 zone histories and returns 24 forecasts: 5- and 10-minute horizons for each zone.
+- The risk summary consumes live forecasts when available. The timeline uses live history and forecasts once it has at least two observations.
+- The counterfactual evaluator restores independent Python twins from the current crowd state and compares candidate plans.
+- The separate legacy REST demo uses synthetic zone-level snapshots; it is not the default stadium's operator-control loop.
 
 ### Still mocked or formula-driven
 
 The default 3D page uses `MockTwinService` and `MockScenarioEngine` for:
 
 - scenario clock and scripted stage progression;
-- Gate B and metro-delay narrative timing;
-- zone density curves shown outside the live gate detector result;
-- 5- and 10-minute forecast curves and confidence values;
+- metro-delay narrative timing (gate changes are manual);
+- fallback risk and forecast values before live data is available, plus remaining narrative/3D zone overlays;
+- the standalone estimated-clearance metric and confidence presentation;
 - contributing-factor percentages;
-- intervention candidates and predicted outcomes;
-- recommendation timing, ranking, approval narrative, and stabilization stage.
+- historical presentation-stage and stabilization narratives.
 
-The Python `ResponseService` is also a deterministic formula-based placeholder. It returns predefined candidate shapes with calculated multipliers; it does not clone the 4,000-person simulation or run real counterfactual rollouts.
+The legacy Python `ResponseService` remains formula-based. The stadium's live intervention panel instead uses `CounterfactualEvaluator`, not this placeholder.
 
 ### Pending
 
-- Move the person-to-gate routing decision from React into Python.
-- Aggregate the live person stream into rolling zone histories.
 - Generate the first reproducible multi-run stadium dataset.
-- Connect the deterministic 5- and 10-minute forecast baseline to the live 3D run.
 - Train gradient-boosted forecasting models only after the dataset exists.
-- Replace formula-based intervention outcomes with actual simulation rollouts.
-- Return backend routing assignments and intervention decisions to the frontend.
 - Add measured before/after evaluation for queue, density, clearance time, walking distance, and rerouting.
 - Calibrate capacities and thresholds against documented assumptions.
 - Defer the wildfire scenario until the stadium loop is complete.
@@ -112,39 +111,40 @@ See [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md) for the canonical architecture, ord
 
 ## 🧭 System architecture
 
-The default application at `/` follows the solid path below. Dashed edges show the intended next architecture, which moves the final decision boundary into Python.
+The default application at `/` follows the integrated paths below. Closed-door escape is enforced locally without waiting for the backend. Optional congestion plans cross an explicit operator-approval boundary.
 
 ```mermaid
 flowchart TD
-    Mock["<b>MockTwinService</b><br/>scenario clock, scripted incidents,<br/>mock forecasts and recommendations"]
-    Field["<b>CrowdField in React</b><br/>4,000 real logical agents, aisle movement,<br/>FIFO queues and exit lifecycle"]
-    WS["<b>ws://localhost:8000/ws/congestion</b>"]
-    Detector["<b>FastAPI CongestionDetector</b><br/>validation, approach geometry, density,<br/>queue, speed, throughput, hysteresis"]
-    UI["<b>Existing React operator UI</b><br/>live detector state, alerts, gate metrics<br/>and 3D gate highlighting"]
-    Reroute["<b>CrowdField</b><br/>currently applies deterministic<br/>rerouting in the browser"]
-    RouteCost["<b>Python route-cost evaluation</b><br/>planned"]
-    Execute["<b>React executes and visualizes assignments</b><br/>planned"]
+    Mock["<b>MockTwinService</b><br/>scenario clock, manual gate states,<br/>remaining presentation fixtures"]
+    Field["<b>CrowdField in React</b><br/>4,000 logical agents, circular walkway,<br/>queues and immediate closed-door escape"]
+    WS["<b>/ws/congestion</b><br/>same-origin WebSocket"]
+    Detector["<b>Python live pipeline</b><br/>validation, gate detection,<br/>zone histories and forecasts"]
+    UI["<b>Existing React operator UI</b><br/>manual gate controls, live metrics,<br/>proposed actions and approval"]
+    Evaluate["<b>Python counterfactual evaluator</b><br/>independent simulation rollouts<br/>from the current crowd state"]
+    Routing["<b>Python RoutingEngine</b><br/>closed-door escape and<br/>operator-approved optional plans"]
 
     Mock --> Field
     Field -- "complete person snapshot every real second" --> WS
     WS --> Detector
-    Detector -- "eight gate results" --> UI
-    UI --> Reroute
-
-    Detector -. "planned: Python detection feeds routing" .-> RouteCost
-    RouteCost -. "changed person-to-gate assignments" .-> Execute
-
-    classDef planned stroke-dasharray: 5 5;
-    class RouteCost,Execute planned;
+    Detector -- "gate metrics, zones and forecasts" --> UI
+    Detector -- "latest live state" --> Evaluate
+    UI -- "automatic evaluation request" --> Evaluate
+    Evaluate -- "candidate actions and evaluation ID" --> UI
+    UI -- "explicit approval of optional plan" --> Routing
+    UI -- "manual open or close" --> Mock
+    Detector -- "current people and gates" --> Routing
+    Routing -- "assignment deltas and release holds" --> Field
 ```
 
-Planned flow, step by step:
+The live intervention loop is:
 
 ```text
 React movement telemetry
     -> Python detection
     -> Python route-cost evaluation
-    -> changed person-to-gate assignments
+    -> isolated candidate rollouts and proposed actions
+    -> explicit operator approval of one evaluated candidate
+    -> changed person-to-boundary-gate assignments
     -> React executes and visualizes assignments
 ```
 
@@ -160,7 +160,7 @@ The shared configuration is [shared/stadium-config.json](shared/stadium-config.j
 - default gate capacity;
 - gate-approach geometry used by the Python detector.
 
-The current prototype capacity is 90 people per simulated minute at each open gate. This is configurable demonstration data, not a measured stadium capacity.
+The current prototype capacity is 30 people per simulated minute at each open gate. This is configurable demonstration data, not a measured stadium capacity.
 
 Each person moves through these states:
 
@@ -169,13 +169,17 @@ waiting in seat
     -> moving along row
     -> descending section aisle
     -> moving around lower base path
-    -> moving through selected gate corridor
-    -> waiting in FIFO gate queue
-    -> crossing exit
+    -> nearest section access passage (independent of assigned exit)
+    -> outer concourse (clockwise/counterclockwise shortest arc)
+    -> waiting in assigned boundary-gate FIFO queue
+    -> approaching the actual doorway (stops if gate closes)
+    -> outside walk (only after crossing an open boundary gate)
     -> exited and removed
 ```
 
 Movement is a deterministic waypoint model. It does not currently implement physical person-to-person collision forces. This keeps the first milestone reproducible and makes queue and route behavior easier to test.
+
+Section passages and boundary gates are distinct. The controls and evaluation refer to boundary gates A–H, not the section openings. The continuous, visibly marked circulation lane is at ring scale 1.12, queue holding areas at 1.20–1.28, and the doorway at 1.331. All queue positions are **inside** the stadium boundary. A diverted person walks back only to the outer lane, then follows the circle to an open gate. The stadium design is retained.
 
 ## 🚦 Congestion detection
 
@@ -183,9 +187,9 @@ The backend constructs all eight approach polygons from the shared stadium confi
 
 - number of people inside the gate approach;
 - approach density in people per square metre;
-- queue length for people assigned to that gate and below the queue-speed threshold;
+- queue length for people assigned to that gate with explicit queued telemetry (legacy phase-less inputs use the speed threshold);
 - mean walking speed;
-- exits recorded during the trailing simulated minute;
+- boundary crossings observed during the trailing simulated minute (outside pedestrians are not counted again when they disappear);
 - raw risk level;
 - persistent congestion and clearing state.
 
@@ -206,21 +210,30 @@ Current prototype defaults:
 > [!IMPORTANT]
 > These thresholds are engineering defaults for the prototype. They are not certified crowd-safety limits.
 
+Throughput is a trailing-minute measure, so it can remain nonzero briefly after closing a gate due to crossings that happened **before** closure. It does not mean new people are passing through. The deterministic walking speed is slowed for demonstration and still needs calibration against detector speed thresholds.
+
 ## 🔀 Current rerouting logic
 
-A person becomes eligible for reassignment when the assigned gate is closed or Python confirms persistent congestion at that gate.
+A closed boundary gate immediately triggers a nearest-open-door search for every affected person still inside. Queue and pre-door pedestrians leave their old queue, return to the outer lane, and follow the shortest angular arc clockwise or counterclockwise. People still leaving the seating bowl keep their access passage and join the outer ring before diverting. Equal-distance choices use a stable person-ID tie break to disperse the crowd. Reopening the original gate does not make people reverse direction.
 
-Closed gates are excluded. Remaining gates are scored using:
+If all gates are closed, nobody can cross the boundary. Opening any gate reactivates the nearest-open search without needing a recommendation, approval, or backend connection. People already outside keep walking away. Congestion at an **open** gate does not trigger an unapproved optimization plan.
+
+If an approved plan's destination closes, its redirect is suspended until another explicit approval. Reopening that gate cannot silently pull pedestrians back from their automatic detour. Existing approved release holds retain their deadline unless the operator stops the plan.
+
+Automatic closed-door escape uses circular distance only, not queue forecasts. For the separate offline autonomous comparison policy, closed gates are excluded and remaining gates are scored using:
 
 ```text
 walking-distance cost
+  + switching and return-to-concourse cost
   + queue-length penalty
   + approach-density penalty
   + confirmed-congestion penalty
   + deterministic tie breaker
 ```
 
-A switching margin and cooldown reduce oscillation. The next milestone will move this scoring into Python and return only changed assignments to React.
+Live Python routing emits `gate_closed` escapes and approved `operator_plan` assignments. The browser also enforces closed-door escape locally, so it never waits for a network response to leave an unusable exit. The autonomous cost-based congestion policy remains available only for offline comparison runs. Frontend and Python rollouts share the same nearest-open rule.
+
+The UI evaluates automatically while the run changes. Selecting a candidate pins its exact evaluation; background refresh cannot silently replace the selected actions. Approval sends its `evaluation_id`, and gate changes invalidate previous proposals. Results expire after 120 wall-clock seconds. “Keep current routes” stops an existing plan/holds without reversing completed movement or changing any gate.
 
 ## 📡 Telemetry contract
 
@@ -236,6 +249,7 @@ Every batch contains:
 | `population` | Must equal 4,000 |
 | `agents` | Every currently active identity |
 | `exited_agents` | Every identity already removed from the run |
+| `closed_gates` | Operator-controlled boundary gates that cannot be crossed |
 
 An active person contains:
 
@@ -246,7 +260,8 @@ An active person contains:
   "z": 5.4,
   "speed_mps": 0.3,
   "target_gate": "gate_b",
-  "movement_state": "queued"
+  "movement_state": "queued",
+  "phase": "queue"
 }
 ```
 
@@ -260,7 +275,7 @@ An exited person contains:
 }
 ```
 
-The backend returns one congestion record for each of the eight gates. Protocol validation errors are returned as structured WebSocket error messages without terminating the connection.
+The backend returns one congestion record for each of the eight gates, live zones and forecasts, and routing deltas/holds. Routing also reports the active plan and `redirect_suspended`, so reopening a door cannot silently revive an obsolete redirect. Protocol validation errors are returned as structured WebSocket error messages without terminating the connection.
 
 ## 💻 Application modes
 
@@ -280,8 +295,11 @@ North Star/
 │   ├── app/
 │   │   ├── congestion/       # Live per-person detector
 │   │   ├── forecasting/      # Deterministic mass-balance baseline
-│   │   ├── response/         # Formula-driven response placeholder
+│   │   ├── live/             # Run registry, zone histories and forecasts
+│   │   ├── response/         # Live counterfactuals plus legacy response service
+│   │   ├── routing/          # Closed-door escape and approved routing plans
 │   │   ├── simulation/       # Separate synthetic zone simulation
+│   │   ├── twin/             # Python stadium movement and rollout restoration
 │   │   └── shared/           # REST API models
 │   ├── scripts/              # Baseline command-line runner
 │   └── tests/
@@ -291,7 +309,8 @@ North Star/
 │       ├── components/       # Legacy REST dashboard
 │       └── twin/
 │           ├── congestion/   # WebSocket client and contracts
-│           ├── mock/         # Scenario, forecast and intervention fixtures
+│           ├── live/         # Evaluation and approval API contracts
+│           ├── mock/         # Clock and remaining presentation fixtures
 │           ├── scene/        # React Three Fiber stadium
 │           ├── services/     # Twin service boundary
 │           ├── sim/          # 4,000-person movement model
@@ -377,13 +396,14 @@ Leave the `VITE_*` values blank for same-origin requests. The WebSocket automati
 3. Press `Start` and select a playback speed.
 4. Observe people leave their rows through the visible aisle gaps.
 5. Close Gate B or another gate from the gate list.
-6. Observe affected people return to the base path and select open alternatives.
+6. Observe the queue disperse automatically onto the marked circular walkway toward the nearest open exit; nobody crosses the closed boundary. People already outside keep walking away.
 7. Wait for the Python detector to confirm congestion at any overloaded approach.
 8. Inspect the live gate density, queue, mean speed, throughput, incident strip, and 3D gate highlight.
-9. Reopen a gate or reset the run.
+9. Optionally select a congestion-management proposal and press **Approve**. Closed-gate escape does not need this action.
+10. Reopen a gate or reset the run. Gate states never change as a side effect of a recommendation.
 
 > [!NOTE]
-> Forecast curves and intervention comparisons shown during this flow remain mock scenario outputs until the live forecast and counterfactual milestones are completed.
+> The intervention panel uses actual Python counterfactual results. Live forecasts feed the risk summary and timeline when available. These are simulation estimates, not measured real-world safety outcomes; some narrative and fallback visuals remain presentation fixtures.
 
 ## 🔌 Backend interfaces
 
@@ -405,11 +425,21 @@ Leave the `VITE_*` values blank for same-origin requests. The WebSocket automati
 
 </details>
 
+Live stadium run endpoints:
+
+| Method | Path | Role |
+| --- | --- | --- |
+| `GET` | `/api/runs` | List in-memory runs |
+| `POST` | `/api/runs/{run_id}/interventions/evaluate` | Evaluate isolated candidate rollouts |
+| `POST` | `/api/runs/{run_id}/interventions/{intervention_id}/approve` | Approve the exact reviewed result with body `{"evaluation_id":"…"}` |
+| `DELETE` | `/api/runs/{run_id}/plan` | Clear the optional plan and release holds |
+| `GET` | `/api/runs/{run_id}/export` | Export run history, assignments and plan state |
+
 WebSockets:
 
 | Path | Role |
 | --- | --- |
-| `/ws/congestion` | Active 3D per-person input and eight-gate congestion output |
+| `/ws/congestion` | Active 3D per-person input; gate detection, zones, forecasts and routing output |
 | `/ws/telemetry` | Legacy synthetic zone-snapshot output |
 
 ## 📈 Deterministic forecast baseline
@@ -430,7 +460,7 @@ source .venv/bin/activate
 python -m scripts.run_baseline --gate-b-closed --metro-delayed --steps 8
 ```
 
-This algorithm is implemented and tested, but the default 3D application does not yet supply it with live rolling zone histories.
+This algorithm is implemented, tested, and connected to the default 3D person's telemetry through `ZoneAggregator` and `LiveForecaster`. The live pipeline emits 5- and 10-minute forecasts for each zone. If a compatible trained GBM artifact is installed, the forecaster can use it; otherwise it uses the deterministic baseline. No training is required to run the current application. Forecast values and confidence bands remain prototype estimates that require validation.
 
 ## 🧪 Tests and quality checks
 
@@ -470,10 +500,12 @@ At the time of this README update, the suite contains:
 
 | Suite | Count |
 | --- | --- |
-| Backend test cases | 36 |
-| Frontend unit tests | 23 |
-| Playwright browser tests | Four existing tests and one opt-in real-stack browser test |
-| Docker smoke test | Covers HTTP, WebSockets, congestion, and rerouting |
+| Backend test cases | 84 |
+| Frontend unit tests | 64 |
+| Playwright browser tests | 6 defined: four UI/contract tests and two opt-in real-stack tests |
+| Docker smoke test | Covers HTTP, WebSockets, congestion, nearest-open escape and the approval boundary |
+
+The counts describe the checked-in suites, not a claim that every browser test was rerun for this revision. To run all six browser tests against an already running full stack, use `PLAYWRIGHT_BASE_URL=http://localhost:8080 npm run test:e2e -- --workers=1 --reporter=list` from `frontend/`. The physical boundary-gate test takes about two minutes.
 
 > [!NOTE]
 > The frontend production build currently emits a non-blocking large-chunk warning for the 3D bundles.
@@ -522,14 +554,11 @@ See [the Docker runbook](docs/DOCKER.md) for configuration, containerized tests,
 
 Work should proceed in this order:
 
-1. Implement a backend routing engine that returns changed person-to-gate assignments.
-2. Replace browser-owned routing decisions with execution of backend assignments.
-3. Export at least 100 reproducible stadium runs with 30-second zone telemetry.
-4. Connect live zone histories to the deterministic 5- and 10-minute forecast baseline.
-5. Add controlled comparisons for all-open, closed without rerouting, and closed with rerouting runs.
-6. Replace formula-driven response outcomes with real counterfactual simulation rollouts.
-7. Build leakage-safe gradient-boosted forecasting only after the dataset is validated.
-8. Freeze and rehearse the stadium demonstration before starting wildfire work.
+1. Calibrate walking speeds, gate capacity, queue layout, and thresholds; consider pedestrian collision avoidance.
+2. Export reproducible comparison runs for all-open gates, automatic closed-door escape, and approved congestion diversions.
+3. Replace remaining scripted narrative panels with live measurements.
+4. Build leakage-safe gradient-boosted forecasting only after the dataset is validated.
+5. Rehearse the stadium demonstration before starting wildfire work.
 
 Detailed ownership and completion conditions are maintained in:
 
@@ -544,5 +573,5 @@ Detailed ownership and completion conditions are maintained in:
 - The prototype uses synthetic people and anonymous numerical IDs.
 - No facial recognition or personally identifiable information is required.
 - Detection thresholds and gate capacities are configurable demonstration assumptions.
-- Operator review remains mandatory for future real intervention recommendations.
+- Operator review remains mandatory for optional congestion plans; automatic nearest-open escape is a simulation rule, not validated real-world emergency guidance.
 - North Star must not claim certification, deployment readiness, or guaranteed safety.

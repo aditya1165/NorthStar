@@ -2,7 +2,7 @@ import asyncio
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 from app.congestion import CongestionDetector, TelemetryBatch
 from app.congestion.models import ProtocolError
@@ -30,6 +30,10 @@ simulation = CrowdSimulation()
 forecaster = ForecastService()
 response_service = ResponseService()
 live_runs = LiveRunRegistry()
+
+
+class LiveApprovalRequest(BaseModel):
+    evaluation_id: str = Field(min_length=1)
 
 
 @app.get("/health")
@@ -117,9 +121,9 @@ def evaluate_run_interventions(run_id: str) -> InterventionEvaluation:
 
 
 @app.post("/api/runs/{run_id}/interventions/{intervention_id}/approve", response_model=PlanStatus)
-def approve_run_intervention(run_id: str, intervention_id: str) -> PlanStatus:
+def approve_run_intervention(run_id: str, intervention_id: str, approval: LiveApprovalRequest) -> PlanStatus:
     try:
-        return live_runs.approve(run_id, intervention_id)
+        return live_runs.approve(run_id, intervention_id, approval.evaluation_id)
     except KeyError as error:
         raise HTTPException(status_code=404, detail=f"Unknown run {run_id}") from error
     except ValueError as error:

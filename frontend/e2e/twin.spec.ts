@@ -7,7 +7,7 @@ test("renders the stadium twin while congestion monitoring connects", async ({ p
   await page.goto("/");
 
   await expect(page.getByRole("heading", { name: "CrowdGuardian" })).toBeVisible();
-  await expect(page.getByText("Mock scenario")).toBeVisible();
+  await expect(page.getByText("Stadium simulation")).toBeVisible();
   await expect(page.getByText(/Detector (live|connecting|unavailable)/)).toBeVisible();
   expect(errors).toEqual([]);
 });

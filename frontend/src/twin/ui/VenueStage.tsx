@@ -40,12 +40,17 @@ export function IncidentStrip() {
   const recommendationStatus = useTwinStore((s) => s.snapshot?.recommendation?.status);
   const congestion = useTwinStore((s) => mostSevereCongestion(s.congestion));
   const congestionConnection = useTwinStore((s) => s.congestionConnection);
+  const closedGates = useTwinStore((s) => s.snapshot?.gates.filter((gate) => gate.status === "closed").map((gate) => gate.id.replace("gate_", "").toUpperCase()).join(", ") ?? "");
 
   let tone: "critical" | "warning" | "info" | "safe" | null = null;
   let text = "";
   if (congestion) {
     tone = congestion.level === "critical" ? "critical" : "warning";
     text = `Congestion detected · ${congestion.label} · ${congestion.densityPerM2.toFixed(1)} p/m² · queue ${congestion.queueLength}`;
+  } else if (closedGates) {
+    tone = "warning";
+    const allClosed = closedGates.split(", ").length === 8;
+    text = `Boundary gate${closedGates.includes(",") ? "s" : ""} ${closedGates} closed · ${allClosed ? "no open exit · reopen a gate to continue" : "automatic detour to nearest open exit"}`;
   } else if (congestionConnection === "unavailable") {
     tone = "warning";
     text = "Congestion monitoring unavailable · waiting for Python backend";
@@ -67,7 +72,7 @@ export function IncidentStrip() {
   switch (stage) {
     case "gate_closure":
       tone = "warning";
-      text = "Gate B closed · turnstile fault · 240 people/min exit capacity lost";
+      text = "Boundary gate state changed by operator";
       break;
     case "metro_delay":
       tone = "warning";
@@ -143,7 +148,7 @@ function Legend() {
           </span>
         ))}
       </div>
-      <div className="mt-1.5 flex gap-3">
+      <div className="mt-1.5 flex flex-wrap gap-3">
         <span className="flex items-center gap-1">
           <span aria-hidden className="h-2 w-2 rounded-full bg-silver" /> Pedestrian
         </span>
@@ -155,6 +160,9 @@ function Legend() {
         </span>
         <span className="flex items-center gap-1">
           <span aria-hidden className="w-4 border-t-2 border-mineral" /> Active route
+        </span>
+        <span className="flex items-center gap-1">
+          <span aria-hidden className="h-2 w-4 border-y border-[#91aaa0] bg-[#3b4743]" /> Walkable 360° concourse
         </span>
       </div>
     </div>

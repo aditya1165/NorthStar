@@ -4,8 +4,19 @@ import type { ScenarioStage } from "../domain/types";
 import { MockScenarioEngine } from "./engine";
 import { SCENARIO } from "./scenario";
 
+/** The test operator, not the playback engine, schedules this incident. */
+function stepWithIncident(engine: MockScenarioEngine) {
+  engine.advance(SCENARIO.step);
+  if (Math.abs(engine.minute - SCENARIO.scripted.gateBClosure) < 1e-6) engine.triggerIncident("gate_b_closure");
+}
+
 function runUntil(engine: MockScenarioEngine, predicate: () => boolean, limit = SCENARIO.duration) {
-  while (!predicate() && engine.minute < limit) engine.advance(SCENARIO.step);
+  while (!predicate() && engine.minute < limit) stepWithIncident(engine);
+}
+
+function controlledIncident(engine: MockScenarioEngine) {
+  engine.setStatus("running");
+  runUntil(engine, () => engine.minute >= SCENARIO.incidentMinute);
 }
 
 describe("MockScenarioEngine", () => {
@@ -20,7 +31,7 @@ describe("MockScenarioEngine", () => {
     const replay = new MockScenarioEngine();
     replay.setStatus("running");
     while (replay.minute < engine.minute) {
-      replay.advance(SCENARIO.step);
+      stepWithIncident(replay);
       const snap = replay.snapshot();
       levels.add(snap.risk.level);
       if (seen.at(-1) !== snap.stage) seen.push(snap.stage);
@@ -60,7 +71,7 @@ describe("MockScenarioEngine", () => {
 
   it("ranks the combined response best and flags trade-offs of the others", () => {
     const engine = new MockScenarioEngine();
-    engine.jumpTo(SCENARIO.incidentMinute);
+    controlledIncident(engine);
     const options = Object.fromEntries(engine.snapshot().interventions.map((o) => [o.id, o]));
     expect(options.gate_c_and_redirect.recommended).toBe(true);
     expect(options.gate_c_and_redirect.outcome.peakDensity).toBeLessThan(options.open_gate_c.outcome.peakDensity);
@@ -94,7 +105,8 @@ describe("MockScenarioEngine", () => {
     expect(engine.snapshot().events.gateBClosedAt).toBe(1);
     expect(engine.snapshot().stage).toBe("gate_closure");
 
-    engine.jumpTo(SCENARIO.incidentMinute);
+    engine.reset();
+    controlledIncident(engine);
     engine.reject();
     expect(engine.snapshot().recommendation?.status).toBe("rejected");
     expect(engine.snapshot().activePlan).toBeNull();
@@ -108,5 +120,15 @@ describe("MockScenarioEngine", () => {
       engine.setGateStatus(gate.id, "open");
       expect(engine.snapshot().gates.find((item) => item.id === gate.id)?.status).toBe("open");
     }
+  });
+
+  it("never closes a gate merely because playback time passes", () => {
+    const engine = new MockScenarioEngine();
+    engine.setStatus("running");
+    engine.advance(SCENARIO.incidentMinute);
+    expect(engine.snapshot().gates.every((gate) => gate.status === "open")).toBe(true);
+    engine.setGateStatus("gate_d", "closed");
+    engine.advance(5);
+    expect(engine.snapshot().gates.filter((gate) => gate.status === "closed").map((gate) => gate.id)).toEqual(["gate_d"]);
   });
 });

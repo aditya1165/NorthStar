@@ -26,7 +26,7 @@ The old ports 5173 and 8000 remain available to separately launched local develo
 docker compose run --rm smoke
 ```
 
-This optional tool service checks the built UI and its JavaScript bundle, both health routes, REST, both WebSocket endpoints, all 4,000 identities, eight gates, persistent congestion, closed-gate rerouting, zone forecasts, and run export. It uses deterministic synthetic contract inputs against the actual Python service, not mocked network responses. It is a connectivity/regression test, not a physical evacuation benchmark.
+This optional tool service checks the built UI and its JavaScript bundle, both health routes, REST, both WebSocket endpoints, all 4,000 identities, eight gates, persistent congestion, automatic closed-gate escape, no unapproved congestion plans, zone forecasts, and run export. It uses deterministic synthetic contract inputs against the actual Python service, not mocked network responses. It is a connectivity/regression test, not a physical evacuation benchmark.
 
 The test adds one uniquely named run to the bounded in-memory registry. It does not reset the shared simulation, approve an intervention, generate datasets, train models, or evaluate expensive counterfactual rollouts. Run it against the built stack, not the Vite development server, because it also verifies production assets.
 
@@ -41,6 +41,8 @@ An additional real-browser check verifies the unchanged stadium canvas, live Pyt
 ```bash
 PLAYWRIGHT_BASE_URL=http://localhost:8080 npm run test:e2e -- docker.spec.ts --workers=1
 ```
+
+For the full physical boundary-gate check (about two minutes), run `PLAYWRIGHT_BASE_URL=http://localhost:8080 npm run test:e2e -- boundary-gates.spec.ts --workers=1`. It closes all eight gates while people are queued/approaching, verifies zero new boundary crossings, then reopens alternatives and verifies automatic outer-concourse dispersal and an open-door exit with **zero approval clicks**.
 
 `PLAYWRIGHT_BASE_URL` points the test at an existing stack and disables Playwright's automatic local Vite server. The test uses real HTTP/WebSocket connections, saves a screenshot under ignored `frontend/test-results/`, and starts one isolated simulation run. It can also verify the development stack's address.
 

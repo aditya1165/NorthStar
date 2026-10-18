@@ -8,7 +8,7 @@ import { zoneAnchor } from "./shapes";
 
 const LEVEL_GLYPH: Record<RiskLevel, string> = { normal: "○", elevated: "◐", high: "◆", critical: "▲" };
 
-function GateLabel({ venue, gate, planned }: { venue: VenueLayout; gate: GateState; planned: boolean }) {
+function GateLabel({ venue, gate }: { venue: VenueLayout; gate: GateState }) {
   const layout = venue.gates.find((g) => g.id === gate.id)!;
   const [x, z] = ringPoint(venue.bowl.rx, venue.bowl.rz, layout.angleDeg, venue.ring.concourseOuter + 0.17);
   const closed = gate.status === "closed";
@@ -20,7 +20,6 @@ function GateLabel({ venue, gate, planned }: { venue: VenueLayout; gate: GateSta
         <div className="text-[11px] font-semibold tracking-wide text-warm">{layout.label}</div>
         <div className="text-[9px] font-medium uppercase tracking-[0.14em]">
           {closed ? "■ Closed" : "▶ Open"}
-          {planned && closed ? " · opens in plan" : ""}
         </div>
       </div>
     </ProjectedLabel>
@@ -55,11 +54,6 @@ export function Labels({ venue, compact }: { venue: VenueLayout; compact: boolea
   const gates = useTwinStore((s) => s.snapshot?.gates);
   const zones = useTwinStore((s) => s.snapshot?.zones);
   const transitDelayed = useTwinStore((s) => s.snapshot?.transit.status === "delayed");
-  const plannedGateC = useTwinStore((s) => {
-    if (s.snapshot?.activePlan) return false;
-    const id = s.selectedInterventionId ?? s.snapshot?.recommendation?.interventionId;
-    return Boolean(s.snapshot?.interventions.find((o) => o.id === id)?.opensGateC);
-  });
   const highlight = useTwinStore((s) => s.snapshot?.recommendation !== null && s.snapshot?.recommendation !== undefined);
 
   if (!show || !gates || !zones) return null;
@@ -69,7 +63,7 @@ export function Labels({ venue, compact }: { venue: VenueLayout; compact: boolea
   return (
     <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden>
       {gates.map((g) => (
-        <GateLabel key={g.id} venue={venue} gate={g} planned={g.id === "gate_c" && plannedGateC} />
+        <GateLabel key={g.id} venue={venue} gate={g} />
       ))}
       {zones
         .filter((z) => !compact || z.level !== "normal")

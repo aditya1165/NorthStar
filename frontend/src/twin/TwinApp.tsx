@@ -1,4 +1,4 @@
-import { Check, ChevronDown, X } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { STAGE_LABEL } from "./domain/risk";
@@ -8,7 +8,7 @@ import { MockTwinService } from "./services/MockTwinService";
 import { useTwinStore } from "./state/twinStore";
 import { Header, StageTrack } from "./ui/Header";
 import { useReducedMotion, useViewportTier } from "./ui/hooks";
-import { DecisionPanel, InterventionList, InterventionPanelSection } from "./ui/Interventions";
+import { InterventionPanelSection } from "./ui/Interventions";
 import { NavRail } from "./ui/NavRail";
 import { PlaybackControls } from "./ui/Playback";
 import { ConfidenceBlock, FactorsBlock, GateStatusBlock, RiskPanel, RiskSummaryBlock } from "./ui/RiskPanel";
@@ -82,25 +82,8 @@ function TabletLayout({ reducedMotion }: { reducedMotion: boolean }) {
   );
 }
 
-function MobileDecisionBar() {
-  const pending = useTwinStore((s) => s.snapshot?.recommendation?.status === "pending" && !s.snapshot?.activePlan);
-  const { approve, reject } = useTwinStore.getState();
-  if (!pending) return null;
-  return (
-    <div className="fixed inset-x-0 bottom-0 z-30 flex gap-2 border-t border-ti-line bg-void/95 p-3 pb-[max(12px,env(safe-area-inset-bottom))] backdrop-blur-md">
-      <button type="button" className="cg-btn-primary h-12 flex-1" onClick={approve}>
-        <Check size={18} aria-hidden /> Approve
-      </button>
-      <button type="button" className="cg-btn-ghost h-12 px-5" onClick={reject} aria-label="Reject recommendation">
-        <X size={16} aria-hidden /> Reject
-      </button>
-    </div>
-  );
-}
-
 function MobileLayout({ reducedMotion }: { reducedMotion: boolean }) {
   const [open, setOpen] = useState(false);
-  const hasRecommendation = useTwinStore((s) => Boolean(s.snapshot?.recommendation || s.snapshot?.activePlan));
   return (
     <div className="cg-root min-h-screen pb-24 text-warm">
       <div className="sticky top-0 z-20">
@@ -108,11 +91,6 @@ function MobileLayout({ reducedMotion }: { reducedMotion: boolean }) {
       </div>
       <div className="space-y-3 px-3 pt-3">
         <IncidentStrip />
-        {hasRecommendation && (
-          <section aria-label="Recommended response" className="cg-surface rounded-lg p-3">
-            <DecisionPanel />
-          </section>
-        )}
       </div>
       <main className="mt-3">
         <VenueStage tier="mobile" reducedMotion={reducedMotion} className="h-[46vh] min-h-[300px] border-y border-ti-line" />
@@ -121,6 +99,7 @@ function MobileLayout({ reducedMotion }: { reducedMotion: boolean }) {
         <PlaybackControls compact />
         <ScenarioTriggers className="flex flex-wrap gap-1.5" />
         <RiskSummaryBlock />
+        <InterventionPanelSection />
         <section className="rounded-lg border border-ti-line">
           <button
             type="button"
@@ -139,10 +118,6 @@ function MobileLayout({ reducedMotion }: { reducedMotion: boolean }) {
               <GateStatusBlock />
               <RiskTimeline height={130} />
               <div className="space-y-2">
-                <h2 className="cg-label">Intervention comparison</h2>
-                <InterventionList />
-              </div>
-              <div className="space-y-2">
                 <h2 className="cg-label">View</h2>
                 <NavRail orientation="horizontal" />
               </div>
@@ -150,7 +125,6 @@ function MobileLayout({ reducedMotion }: { reducedMotion: boolean }) {
           )}
         </section>
       </div>
-      <MobileDecisionBar />
     </div>
   );
 }

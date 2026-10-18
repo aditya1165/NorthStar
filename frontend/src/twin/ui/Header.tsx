@@ -75,7 +75,7 @@ export function Header({ compact, compactControls = false }: { compact: boolean;
       {!compact && <StageTrack className="ml-4 hidden xl:flex" />}
       <div className="ml-auto flex items-center gap-4">
         <span className="hidden whitespace-nowrap rounded-[3px] border border-violet/40 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em] text-violet-soft sm:inline">
-          Mock scenario
+          Stadium simulation
         </span>
         <span
           className={cn(

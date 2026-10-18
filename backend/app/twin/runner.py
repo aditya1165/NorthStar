@@ -12,7 +12,7 @@ from app.twin.field import MAX_STEP, Phase, StadiumTwin
 from app.twin.layout import GATE_IDS, GATE_INDEX
 from app.twin.monitor import GateMonitor
 
-POLICIES = ("engine", "local", "naive")
+POLICIES = ("engine", "operator", "local", "naive")
 
 
 @dataclass(frozen=True)
@@ -65,7 +65,7 @@ class TwinRunner:
         self.events = sorted(events or [], key=lambda event: event.minute)
         self.zones = ZoneAggregator(population=twin.count)
         self.monitor = GateMonitor()
-        self.engine = RoutingEngine()
+        self.engine = RoutingEngine(autonomous=policy == "engine")
         self.engine.set_plan(plan)
         self.on_measure = on_measure
         self.metrics = RunMetrics()
@@ -89,10 +89,11 @@ class TwinRunner:
             else:
                 self._closed_set.discard(event.gate_id)
             self.twin.set_closed(self._closed_set)
+            self.engine.observe_gates(self.twin.closed)
 
     def _measure(self, seconds: float) -> None:
         twin = self.twin
-        active = np.where(twin.phase != Phase.EXITED)[0]
+        active = np.where(twin.phase < Phase.EXIT)[0]
         zones = self.zones.observe(
             seconds,
             active,
@@ -101,6 +102,10 @@ class TwinRunner:
             twin.speed_mps[active],
             twin.target[active],
             self._closed_set,
+            queued_mask=(twin.phase[active] == Phase.QUEUE) | (
+                (twin.phase[active] == Phase.GATE_APPROACH)
+                & twin.closed[twin.target[active]]
+            ),
         )
         twin.signals = self.monitor.update(seconds, zones)
         m = self.metrics
@@ -145,14 +150,14 @@ class TwinRunner:
 
     def run_until(self, minute: float) -> RunMetrics:
         twin = self.twin
-        twin_policy = self.policy if self.policy != "engine" else "none"
+        twin_policy = "none" if self.policy in ("engine", "operator") else self.policy
         while twin.time < minute - 1e-6:
             self._apply_events()
             seconds = round(twin.time * 60, 6)
             if seconds >= self._next_measure - 1e-6:
                 self._measure(seconds)
                 self._next_measure += self.measure_interval
-            if self.policy == "engine" and seconds >= self._next_route - 1e-6:
+            if self.policy in ("engine", "operator") and seconds >= self._next_route - 1e-6:
                 self._route(seconds)
                 self._next_route += self.routing_interval
             to_measure = self._next_measure / 60 - twin.time

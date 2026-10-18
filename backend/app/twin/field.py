@@ -17,6 +17,7 @@ from app.twin.layout import (
     BASE_SCALE,
     BOWL_RX,
     BOWL_RZ,
+    CONCOURSE_SCALE,
     GATE_ANGLES,
     GATE_CAPACITY,
     GATE_DESTINATIONS,
@@ -31,7 +32,9 @@ from app.twin.layout import (
     SECTION_ANGLES,
     SECTION_COUNT,
     angle_delta,
-    base_path_meters,
+    concourse_path_meters,
+    nearest_open_gate,
+    ring_coords,
 )
 
 DEFAULT_SEED = 20260614
@@ -39,7 +42,6 @@ WALK_SPEED = 1.3
 MAX_STEP = 0.04
 REROUTE_MARGIN_METERS = 12.0
 REROUTE_COOLDOWN_MINUTES = 0.5
-NAIVE_DISCOVERY_MINUTES = 1.0
 
 
 class Phase(IntEnum):
@@ -49,9 +51,12 @@ class Phase(IntEnum):
     BASE_RING = 3
     GATE_CORRIDOR = 4
     QUEUE = 5
-    RETURN_TO_BASE = 6
-    EXIT = 7
-    EXITED = 8
+    RETURN_TO_CONCOURSE = 6
+    RETURN_TO_BASE = 6  # Legacy name; reroutes now stay outside the stands.
+    CONCOURSE = 7
+    GATE_APPROACH = 8
+    EXIT = 9
+    EXITED = 10
 
 
 PHASE_NAMES = {
@@ -61,11 +66,14 @@ PHASE_NAMES = {
     Phase.BASE_RING: "base_ring",
     Phase.GATE_CORRIDOR: "gate_corridor",
     Phase.QUEUE: "queue",
-    Phase.RETURN_TO_BASE: "return_to_base",
+    Phase.RETURN_TO_CONCOURSE: "return_to_concourse",
+    Phase.CONCOURSE: "concourse",
+    Phase.GATE_APPROACH: "gate_approach",
     Phase.EXIT: "exit",
     Phase.EXITED: "exited",
 }
 PHASE_BY_NAME = {name: phase for phase, name in PHASE_NAMES.items()}
+PHASE_BY_NAME["return_to_base"] = Phase.RETURN_TO_CONCOURSE
 MOVEMENT_STATE = {
     Phase.WAITING: "waiting",
     Phase.ROW: "moving",
@@ -73,7 +81,9 @@ MOVEMENT_STATE = {
     Phase.BASE_RING: "moving",
     Phase.GATE_CORRIDOR: "moving",
     Phase.QUEUE: "queued",
-    Phase.RETURN_TO_BASE: "moving",
+    Phase.RETURN_TO_CONCOURSE: "moving",
+    Phase.CONCOURSE: "moving",
+    Phase.GATE_APPROACH: "moving",
     Phase.EXIT: "exiting",
 }
 
@@ -155,6 +165,7 @@ class StadiumTwin:
         self.scale = self.seat_scale.copy()
         self.target = self._nearest_gate(self.seat_angle)
         self.initial_target = self.target.copy()
+        self.access_gate = self.target.copy()
         self.x, self.z = self._ring_xy(self.angle, self.scale)
         self.ex = np.zeros(n)
         self.ez = np.zeros(n)
@@ -196,6 +207,22 @@ class StadiumTwin:
 
     # ---------------------------------------------------------------- routing
 
+    def _escape_closed_targets(self) -> None:
+        """A blocked door triggers walking to the nearest open boundary door.
+
+        This safety movement is independent of optional congestion plans. It
+        never changes an open destination or moves anyone already outside.
+        """
+        if not np.any(self.closed) or np.all(self.closed):
+            return
+        ids = np.where((self.phase < Phase.EXIT) & self.closed[self.target])[0]
+        if ids.size == 0:
+            return
+        angles, _ = ring_coords(self.x[ids], self.z[ids])
+        inside_passage = self.phase[ids] <= Phase.GATE_CORRIDOR
+        angles[inside_passage] = GATE_ANGLES[self.access_gate[ids[inside_passage]]]
+        self.apply_assignments(ids, nearest_open_gate(angles, ids, self.closed))
+
     def apply_assignments(self, person_ids: np.ndarray, gates: np.ndarray) -> int:
         """Execute routing deltas exactly as the React twin does. Returns count applied."""
         person_ids = np.asarray(person_ids, dtype=np.int64)
@@ -203,35 +230,47 @@ class StadiumTwin:
         if person_ids.size == 0:
             return 0
         phase = self.phase[person_ids]
-        valid = (phase < Phase.EXIT) & (self.target[person_ids] != gates)
+        valid = (phase < Phase.EXIT) & (self.target[person_ids] != gates) & ~self.closed[gates]
         ids = person_ids[valid]
         new = gates[valid]
         if ids.size == 0:
             return 0
         old = self.target[ids]
-        detour = base_path_meters(self.angle[ids], GATE_ANGLES[new]) - base_path_meters(
+        leaving = np.isin(self.phase[ids], (Phase.QUEUE, Phase.GATE_APPROACH)) | (
+            (self.phase[ids] == Phase.CONCOURSE)
+            & (self.scale[ids] > CONCOURSE_SCALE + 1e-4)
+        )
+        # Queue positions spread around their gate. Recover their actual polar position
+        # before retreating to the ring, otherwise reassignment teleports them sideways.
+        outside_ids = ids[leaving]
+        self.angle[outside_ids], self.scale[outside_ids] = ring_coords(
+            self.x[outside_ids], self.z[outside_ids]
+        )
+        detour = concourse_path_meters(self.angle[ids], GATE_ANGLES[new]) - concourse_path_meters(
             self.angle[ids], GATE_ANGLES[old]
         )
-        leaving = np.isin(self.phase[ids], (Phase.GATE_CORRIDOR, Phase.QUEUE))
-        climb = np.maximum(0.0, self.scale[ids] - BASE_SCALE) * MEAN_RADIUS * METERS_PER_SCENE_UNIT
+        climb = (
+            np.maximum(0.0, self.scale[ids] - CONCOURSE_SCALE)
+            * MEAN_RADIUS * METERS_PER_SCENE_UNIT
+        )
         detour = detour + np.where(leaving, 2 * climb, 0.0)
         self.extra_walk_m[ids] += detour
         self.target[ids] = new
         self.rerouted[ids] = True
         self.reroute_count[ids] += 1
         self.last_reroute[ids] = self.time
-        self.phase[ids[leaving]] = Phase.RETURN_TO_BASE
+        self.phase[ids[leaving]] = Phase.RETURN_TO_CONCOURSE
         self.queued_at[ids[leaving]] = np.inf
         return int(ids.size)
 
     def _route_cost(self, idx: np.ndarray, gate: np.ndarray) -> np.ndarray:
         s = self.signals
-        walking = base_path_meters(self.angle[idx], GATE_ANGLES[gate])
+        walking = concourse_path_meters(self.angle[idx], GATE_ANGLES[gate])
         tie = ((idx * 17 + gate * 31) % 19) * 0.03
         return walking + s.queue[gate] * 0.12 + s.density[gate] * 4 + s.congested[gate] * 20 + tie
 
     def _select_local(self, idx: np.ndarray) -> np.ndarray:
-        """Vectorised port of ``CrowdField.selectGate`` (closure / congestion aware)."""
+        """Offline congestion-aware policy, beyond the universal closed-door escape."""
         current = self.target[idx].astype(np.int64)
         if idx.size == 0:
             return current
@@ -261,43 +300,17 @@ class StadiumTwin:
         self.last_reroute[idx[chosen]] = self.time
         return result
 
-    def _select_naive(self, idx: np.ndarray) -> np.ndarray:
-        """No guidance: people only discover a closure after waiting at the closed gate."""
-        current = self.target[idx].astype(np.int64)
-        stuck = (
-            (self.phase[idx] == Phase.QUEUE)
-            & self.closed[current]
-            & (self.time - self.queued_at[idx] >= NAIVE_DISCOVERY_MINUTES)
-        )
-        if not np.any(stuck) or np.all(self.closed):
-            return current
-        cand = idx[stuck]
-        distance = np.abs(angle_delta(GATE_ANGLES[current[stuck]][:, None], GATE_ANGLES[None, :]))
-        distance[:, self.closed] = np.inf
-        result = current.copy()
-        result[stuck] = np.argmin(distance, axis=1)
-        self.last_reroute[cand] = self.time
-        return result
-
     def _select(self, idx: np.ndarray, policy: str) -> np.ndarray:
         if policy == "local":
             return self._select_local(idx)
-        if policy == "naive":
-            return self._select_naive(idx)
+        # The no-guidance comparison still avoids physically closed doors; it
+        # makes no optional congestion or load-balancing choices.
         return self.target[idx].astype(np.int64)
 
     def _retarget(self, idx: np.ndarray, selected: np.ndarray) -> np.ndarray:
         changed = selected != self.target[idx]
         if np.any(changed):
-            ids = idx[changed]
-            old = self.target[ids]
-            new = selected[changed]
-            self.extra_walk_m[ids] += base_path_meters(
-                self.angle[ids], GATE_ANGLES[new]
-            ) - base_path_meters(self.angle[ids], GATE_ANGLES[old])
-            self.target[ids] = new
-            self.rerouted[ids] = True
-            self.reroute_count[ids] += 1
+            self.apply_assignments(idx[changed], selected[changed])
         return changed
 
     # ------------------------------------------------------------- simulation
@@ -311,6 +324,7 @@ class StadiumTwin:
             guard += 1
 
     def step(self, dt: float, policy: str = "local") -> None:
+        self._escape_closed_targets()
         phase = self.phase.copy()
         step_distance = self.speed * WALK_SPEED * dt
         base_mps = self.speed * WALK_SPEED * METERS_PER_SCENE_UNIT / 60
@@ -342,7 +356,7 @@ class StadiumTwin:
         ring = np.where(phase == Phase.BASE_RING)[0]
         if ring.size:
             self._retarget(ring, self._select(ring, policy))
-            goal = GATE_ANGLES[self.target[ring]]
+            goal = GATE_ANGLES[self.access_gate[ring]]
             arrived = self._move_angle(
                 ring, goal, step_distance[ring], np.full(ring.size, BASE_SCALE)
             )
@@ -352,13 +366,43 @@ class StadiumTwin:
 
         corridor = np.where(phase == Phase.GATE_CORRIDOR)[0]
         if corridor.size:
-            changed = self._retarget(corridor, self._select(corridor, policy))
-            self.phase[corridor[changed]] = Phase.RETURN_TO_BASE
-            stay = corridor[~changed]
-            self.angle[stay] = GATE_ANGLES[self.target[stay]]
-            self.scale[stay] = np.minimum(QUEUE_INNER_SCALE, self.scale[stay] + step_distance[stay] / 10)
-            self.x[stay], self.z[stay] = self._ring_xy(self.angle[stay], self.scale[stay])
-            entering = stay[self.scale[stay] >= QUEUE_INNER_SCALE - 1e-4]
+            self._retarget(corridor, self._select(corridor, policy))
+            self.angle[corridor] = GATE_ANGLES[self.access_gate[corridor]]
+            self.scale[corridor] = np.minimum(
+                CONCOURSE_SCALE, self.scale[corridor] + step_distance[corridor] / 10
+            )
+            arrived = corridor[self.scale[corridor] >= CONCOURSE_SCALE - 1e-4]
+            self.scale[arrived] = CONCOURSE_SCALE
+            self.x[corridor], self.z[corridor] = self._ring_xy(
+                self.angle[corridor], self.scale[corridor]
+            )
+            self.phase[arrived] = Phase.CONCOURSE
+
+        concourse = np.where(phase == Phase.CONCOURSE)[0]
+        if concourse.size:
+            self._retarget(concourse, self._select(concourse, policy))
+            concourse = concourse[self.phase[concourse] == Phase.CONCOURSE]
+            goal = GATE_ANGLES[self.target[concourse]]
+            aligned = np.abs(angle_delta(self.angle[concourse], goal)) <= 1e-4
+            arc = concourse[~aligned]
+            self._move_angle(
+                arc,
+                goal[~aligned],
+                step_distance[arc],
+                np.full(arc.size, CONCOURSE_SCALE),
+            )
+            # The circulation arc is outside the seating bowl. Only at the target
+            # gate do people move radially out into its queue.
+            # A turn and radial approach each consume a simulation step: never
+            # spend the same pedestrian's distance budget twice at the junction.
+            ready = concourse[aligned]
+            self.scale[ready] = np.minimum(
+                QUEUE_INNER_SCALE, self.scale[ready] + step_distance[ready] / 10
+            )
+            self.x[concourse], self.z[concourse] = self._ring_xy(
+                self.angle[concourse], self.scale[concourse]
+            )
+            entering = ready[self.scale[ready] >= QUEUE_INNER_SCALE - 1e-4]
             for person in entering.tolist():
                 self.phase[person] = Phase.QUEUE
                 self.queued_at[person] = self.time
@@ -367,8 +411,6 @@ class StadiumTwin:
         queue = np.where(phase == Phase.QUEUE)[0]
         if queue.size:
             changed = self._retarget(queue, self._select(queue, policy))
-            self.phase[queue[changed]] = Phase.RETURN_TO_BASE
-            self.queued_at[queue[changed]] = np.inf
             stay = queue[~changed]
             gate_angle = GATE_ANGLES[self.target[stay]] + (self.hash_a[stay] - 0.5) * 7
             queue_scale = QUEUE_INNER_SCALE + self.hash_b[stay] * (QUEUE_OUTER_SCALE - QUEUE_INNER_SCALE)
@@ -377,24 +419,42 @@ class StadiumTwin:
             self.x[stay] += (qx - self.x[stay]) * k
             self.z[stay] += (qz - self.z[stay]) * k
 
-        back = np.where(phase == Phase.RETURN_TO_BASE)[0]
+        back = np.where(phase == Phase.RETURN_TO_CONCOURSE)[0]
         if back.size:
-            self.scale[back] = np.maximum(BASE_SCALE, self.scale[back] - step_distance[back] / 10)
+            self.scale[back] = np.maximum(
+                CONCOURSE_SCALE, self.scale[back] - step_distance[back] / 10
+            )
+            arrived = back[self.scale[back] <= CONCOURSE_SCALE + 1e-4]
+            self.scale[arrived] = CONCOURSE_SCALE
             self.x[back], self.z[back] = self._ring_xy(self.angle[back], self.scale[back])
-            self.phase[back[self.scale[back] <= BASE_SCALE + 1e-4]] = Phase.BASE_RING
+            self.phase[arrived] = Phase.CONCOURSE
+
+        approach = np.where(phase == Phase.GATE_APPROACH)[0]
+        if approach.size:
+            changed = self._retarget(approach, self._select(approach, policy))
+            stay = approach[~changed]
+            blocked = stay[self.closed[self.target[stay]]]
+            self.speed_mps[blocked] = 0.0
+            walking = stay[~self.closed[self.target[stay]]]
+            arrived = self._move_segment(walking, step_distance[walking])
+            for person in walking[arrived].tolist():
+                self._begin_outside_walk(person)
 
         leaving = np.where(phase == Phase.EXIT)[0]
         if leaving.size:
-            self.progress[leaving] += step_distance[leaving]
-            fraction = np.minimum(1.0, self.progress[leaving] / self.exit_len[leaving])
-            self.x[leaving] = self.ex[leaving] + (self.dx[leaving] - self.ex[leaving]) * fraction
-            self.z[leaving] = self.ez[leaving] + (self.dz[leaving] - self.ez[leaving]) * fraction
-            done = leaving[fraction >= 1]
+            done = leaving[self._move_segment(leaving, step_distance[leaving])]
             self.phase[done] = Phase.EXITED
             self.speed_mps[done] = 0.0
             self.exited_at[done] = max(0.0, self.time * 60)
 
         self._serve_queues(dt)
+
+    def _move_segment(self, idx: np.ndarray, distance: np.ndarray) -> np.ndarray:
+        self.progress[idx] += distance
+        fraction = np.minimum(1.0, self.progress[idx] / self.exit_len[idx])
+        self.x[idx] = self.ex[idx] + (self.dx[idx] - self.ex[idx]) * fraction
+        self.z[idx] = self.ez[idx] + (self.dz[idx] - self.ez[idx]) * fraction
+        return fraction >= 1
 
     def _move_angle(
         self, idx: np.ndarray, goal: np.ndarray, distance: np.ndarray, scale: np.ndarray
@@ -428,8 +488,23 @@ class StadiumTwin:
             self.queue_head[gate] = head
 
     def _begin_exit(self, person: int) -> None:
+        """Serve the queue into a pre-boundary approach, not an outside phase."""
         gate = int(self.target[person])
         portal_x, portal_z = GATE_PORTALS[gate]
+        self.ex[person] = self.x[person]
+        self.ez[person] = self.z[person]
+        self.dx[person] = portal_x
+        self.dz[person] = portal_z
+        self.exit_len[person] = max(
+            0.01, float(np.hypot(portal_x - self.ex[person], portal_z - self.ez[person]))
+        )
+        self.progress[person] = 0.0
+        self.phase[person] = Phase.GATE_APPROACH
+        self.queued_at[person] = np.inf
+
+    def _begin_outside_walk(self, person: int) -> None:
+        """Only people who reached the open boundary portal may walk away outside."""
+        gate = int(self.target[person])
         dest_x, dest_z = GATE_DESTINATIONS[gate]
         angle = GATE_ANGLES[gate] * pi / 180
         lane = (self.hash_a[person] - 0.5) * 1.1
@@ -437,10 +512,10 @@ class StadiumTwin:
         self.ez[person] = self.z[person]
         self.dx[person] = dest_x - np.sin(angle) * lane
         self.dz[person] = dest_z + np.cos(angle) * lane
-        length = np.hypot(portal_x - self.ex[person], portal_z - self.ez[person]) + np.hypot(
-            self.dx[person] - portal_x, self.dz[person] - portal_z
+        self.exit_len[person] = max(
+            0.01,
+            float(np.hypot(self.dx[person] - self.ex[person], self.dz[person] - self.ez[person])),
         )
-        self.exit_len[person] = max(0.01, float(length))
         self.progress[person] = 0.0
         self.phase[person] = Phase.EXIT
         self.queued_at[person] = np.inf
@@ -452,7 +527,9 @@ class StadiumTwin:
         return self.phase != Phase.EXITED
 
     def queued_per_gate(self) -> np.ndarray:
-        queued = self.phase == Phase.QUEUE
+        queued = (self.phase == Phase.QUEUE) | (
+            (self.phase == Phase.GATE_APPROACH) & self.closed[self.target]
+        )
         return np.bincount(self.target[queued], minlength=len(GATE_IDS)).astype(float)
 
     def exited_count(self) -> int:
@@ -477,7 +554,11 @@ class StadiumTwin:
                     "z": round(float(self.z[i]), 3),
                     "speed_mps": round(float(self.speed_mps[i]), 2),
                     "target_gate": gate,
-                    "movement_state": MOVEMENT_STATE[phase],
+                    "movement_state": (
+                        "queued"
+                        if phase == Phase.GATE_APPROACH and self.closed[self.target[i]]
+                        else MOVEMENT_STATE[phase]
+                    ),
                     "phase": PHASE_NAMES[phase],
                 }
             )

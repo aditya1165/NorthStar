@@ -5,6 +5,7 @@ import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js
 
 import { DEG, ringPoint } from "../domain/geometry";
 import type { VenueLayout } from "../domain/types";
+import { CONCOURSE_SCALE, GATE_PORTAL_SCALE } from "../sim/paths";
 import { PALETTE } from "../ui/palette";
 import { ellipsePoints, ellipseShape, extrudedGeometry, flatGeometry, sectorShape } from "./shapes";
 
@@ -51,6 +52,7 @@ export function Stadium({ venue, highlightSections, detail }: { venue: VenueLayo
     const seating = buildSeating(venue, (n) => !isHighlight(n));
     const highlight = buildSeating(venue, isHighlight);
     const concourse = flatGeometry(sectorShape(rx, rz, -180, 180, ring.concourseInner, ring.concourseOuter, 120));
+    const walkway = flatGeometry(sectorShape(rx, rz, -180, 180, CONCOURSE_SCALE - 0.045, CONCOURSE_SCALE + 0.045, 180));
     const apron = flatGeometry(sectorShape(rx, rz, -180, 180, ring.seatOuter, ring.concourseInner, 120));
     const pitch = flatGeometry(ellipseShape(0, 0, rx * ring.pitch, rz * ring.pitch, 72));
 
@@ -78,7 +80,7 @@ export function Stadium({ venue, highlightSections, detail }: { venue: VenueLayo
 
     const seatingEdges = new THREE.EdgesGeometry(seating, 25);
     const highlightEdges = new THREE.EdgesGeometry(highlight, 25);
-    return { seating, highlight, concourse, apron, pitch, wall, strut, seatingEdges, highlightEdges };
+    return { seating, highlight, concourse, walkway, apron, pitch, wall, strut, seatingEdges, highlightEdges };
   }, [venue, rx, rz, ring]);
 
   useEffect(() => () => Object.values(geometries).forEach((g) => g.dispose()), [geometries]);
@@ -87,6 +89,9 @@ export function Stadium({ venue, highlightSections, detail }: { venue: VenueLayo
     () => ({
       concourseOuter: ellipsePoints(rx, rz, ring.concourseOuter, 0.012),
       concourseInner: ellipsePoints(rx, rz, ring.concourseInner, 0.012),
+      circulation: ellipsePoints(rx, rz, CONCOURSE_SCALE, 0.04),
+      walkwayInner: ellipsePoints(rx, rz, CONCOURSE_SCALE - 0.045, 0.04),
+      walkwayOuter: ellipsePoints(rx, rz, CONCOURSE_SCALE + 0.045, 0.04),
       basePath: ellipsePoints(rx, rz, ring.basePath, 0.018),
       canopy: ellipsePoints(rx, rz, ring.seatOuter + 0.012, 3.1),
       canopyInner: ellipsePoints(rx, rz, ring.seatOuter - 0.16, 2.95),
@@ -98,8 +103,12 @@ export function Stadium({ venue, highlightSections, detail }: { venue: VenueLayo
       centre: ellipsePoints(1.1, 1.1, 1, 0.03, 40),
       exits: venue.gates.map((g) => {
         const [x, z] = ringPoint(rx, rz, g.angleDeg, ring.basePath);
+        const [cx, cz] = ringPoint(rx, rz, g.angleDeg, CONCOURSE_SCALE);
+        const [gx, gz] = ringPoint(rx, rz, g.angleDeg, GATE_PORTAL_SCALE);
         return [
           [x, 0.012, z],
+          [cx, 0.012, cz],
+          [gx, 0.012, gz],
           [g.destination[0], 0.012, g.destination[1]],
         ] as [number, number, number][];
       }),
@@ -163,8 +172,15 @@ export function Stadium({ venue, highlightSections, detail }: { venue: VenueLayo
       <mesh geometry={geometries.concourse} position-y={0.004}>
         <meshStandardMaterial color={PALETTE.smoke} roughness={0.95} />
       </mesh>
+      {/* Continuous walkable lane, clear of stands, queues and boundary doors. */}
+      <mesh geometry={geometries.walkway} position-y={0.009}>
+        <meshStandardMaterial color="#3b4743" roughness={0.92} />
+      </mesh>
       <Line points={lines.concourseOuter} color={PALETTE.titanium} lineWidth={1} />
       <Line points={lines.concourseInner} color={PALETTE.titanium} lineWidth={1} transparent opacity={0.6} />
+      <Line points={lines.circulation} color={PALETTE.titaniumLight} lineWidth={1.2} dashed dashSize={0.35} gapSize={0.22} transparent opacity={0.65} />
+      <Line points={lines.walkwayInner} color="#91aaa0" lineWidth={1} transparent opacity={0.65} />
+      <Line points={lines.walkwayOuter} color="#91aaa0" lineWidth={1} transparent opacity={0.65} />
       <Line points={lines.basePath} color={PALETTE.titaniumLight} lineWidth={1} transparent opacity={0.45} />
       <mesh geometry={geometries.wall}>
         <meshStandardMaterial color="#2c2c31" roughness={0.6} metalness={0.4} />

@@ -3,11 +3,12 @@ import { useFrame } from "@react-three/fiber";
 import { useMemo, useRef } from "react";
 import type { Line2, LineMaterial } from "three-stdlib";
 
-import type { RouteLayout, VenueLayout } from "../domain/types";
-import { previewIntervention, useTwinStore } from "../state/twinStore";
+import type { Point2, VenueLayout } from "../domain/types";
+import { useTwinStore } from "../state/twinStore";
+import { boundaryRoute } from "../sim/paths";
 import { PALETTE } from "../ui/palette";
 
-function FlowLine({ route, mode, reducedMotion }: { route: RouteLayout; mode: "preview" | "active"; reducedMotion: boolean }) {
+function FlowLine({ route, mode, reducedMotion }: { route: { points: Point2[] }; mode: "preview" | "active"; reducedMotion: boolean }) {
   const ref = useRef<Line2>(null);
   const points = useMemo(() => route.points.map(([x, z]) => [x, 0.12, z] as [number, number, number]), [route]);
   const under = useMemo(() => route.points.map(([x, z]) => [x, 0.08, z] as [number, number, number]), [route]);
@@ -42,21 +43,17 @@ function FlowLine({ route, mode, reducedMotion }: { route: RouteLayout; mode: "p
 
 export function Routes({ venue, reducedMotion }: { venue: VenueLayout; reducedMotion: boolean }) {
   const show = useTwinStore((s) => s.layers.routes);
-  const preview = useTwinStore(previewIntervention);
-  const activePlan = useTwinStore((s) => s.snapshot?.activePlan ?? null);
-  const interventions = useTwinStore((s) => s.snapshot?.interventions);
-
-  const activeOption = activePlan ? interventions?.find((o) => o.id === activePlan.interventionId) : undefined;
-  const mode: "preview" | "active" = activeOption ? "active" : "preview";
-  const routeIds = activeOption?.routeIds ?? preview?.routeIds ?? [];
-
-  if (!show || routeIds.length === 0) return null;
-  return (
-    <group>
-      {routeIds.map((id) => {
-        const route = venue.routes.find((r) => r.id === id);
-        return route ? <FlowLine key={`${mode}-${id}`} route={route} mode={mode} reducedMotion={reducedMotion} /> : null;
-      })}
-    </group>
-  );
+  const evaluation = useTwinStore((s) => s.liveEvaluation);
+  const selectedId = useTwinStore((s) => s.liveSelectedId);
+  const approvedRoute = useTwinStore((s) => s.liveApprovedRoute);
+  const redirectSuspended = useTwinStore((s) => s.congestion?.routing?.redirectSuspended ?? false);
+  const gates = useTwinStore((s) => s.snapshot?.gates);
+  const candidate = evaluation?.candidates.find((item) => item.interventionId === (selectedId ?? evaluation.recommendedId));
+  const preview = candidate?.feasible && candidate.redirectGate && evaluation
+    ? { from: evaluation.hotspotGate, to: candidate.redirectGate } : null;
+  const route = preview ?? (redirectSuspended ? null : approvedRoute);
+  const mode = preview ? "preview" : "active";
+  const layout = useMemo(() => route ? { id: `${route.from}-${route.to}`, label: "Outer concourse diversion", points: boundaryRoute(venue, route.from, route.to) } : null, [venue, route?.from, route?.to]);
+  if (!show || !layout || gates?.some((gate) => gate.id === route?.to && gate.status === "closed")) return null;
+  return <FlowLine route={layout} mode={mode} reducedMotion={reducedMotion} />;
 }

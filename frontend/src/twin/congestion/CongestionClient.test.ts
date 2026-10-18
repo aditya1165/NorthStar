@@ -67,7 +67,24 @@ describe("parseSnapshot", () => {
       estimatedBenefitSeconds: 0,
     });
     expect(snapshot?.routing?.holds).toEqual([{ section: 205, untilSeconds: 300 }]);
+    expect(snapshot?.routing?.redirectSuspended).toBe(false);
     expect(snapshot?.zones?.[0].status).toBe("closed");
     expect(snapshot?.forecasts?.[0].method).toBe("gbm");
+  });
+
+  it.each([true, false])("parses the optional redirect-suspended flag as %s", (suspended) => {
+    const snapshot = parseSnapshot({
+      ...base,
+      routing: {
+        assignments: [],
+        holds: [],
+        gate_wait_seconds: {},
+        redirected_total: 42,
+        active_plan_id: "redirect_sections",
+        redirect_suspended: suspended,
+      },
+    });
+    expect(snapshot?.routing?.activePlanId).toBe("redirect_sections");
+    expect(snapshot?.routing?.redirectSuspended).toBe(suspended);
   });
 });

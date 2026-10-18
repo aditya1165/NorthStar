@@ -6,14 +6,16 @@ import type {
   RouteAssignment,
   SectionHold,
 } from "../congestion/types";
-import { angleDelta, ringPoint } from "../domain/geometry";
-import type { GateId, InterventionOption, TwinSnapshot, VenueLayout } from "../domain/types";
+import { angleDelta, ringCoords, ringPoint } from "../domain/geometry";
+import type { GateId, TwinSnapshot, VenueLayout } from "../domain/types";
+import { CONCOURSE_SCALE, GATE_PORTAL_SCALE, QUEUE_INNER_SCALE, QUEUE_OUTER_SCALE } from "./paths";
 
 /**
  * Deterministic stadium egress model.
  *
  * Every person follows explicit waypoints: seat row -> section aisle -> lower
- * base path -> assigned gate corridor -> FIFO gate queue -> outside. The model
+ * base path -> nearest access passage -> outer concourse -> boundary gate queue
+ * -> doorway -> outside. The model
  * intentionally avoids collision physics; gate capacity and queue order are
  * deterministic and therefore straightforward to test.
  */
@@ -25,18 +27,14 @@ const Phase = {
   BaseRing: 3,
   GateCorridor: 4,
   Queue: 5,
-  ReturnToBase: 6,
-  Exit: 7,
-  Exited: 8,
+  ReturnToConcourse: 6,
+  Concourse: 7,
+  GateApproach: 8,
+  Exit: 9,
+  Exited: 10,
 } as const;
 
 export const AGENT_COLOR = { normal: 0, rerouted: 1, waiting: 2 } as const;
-
-/**
- * "local": the field chooses gates itself (offline fallback).
- * "backend": Python owns routing; the field only executes assignment deltas.
- */
-export type RoutingMode = "local" | "backend";
 
 const PHASE_NAME: Record<number, PersonPhase> = {
   [Phase.Waiting]: "waiting",
@@ -45,7 +43,9 @@ const PHASE_NAME: Record<number, PersonPhase> = {
   [Phase.BaseRing]: "base_ring",
   [Phase.GateCorridor]: "gate_corridor",
   [Phase.Queue]: "queue",
-  [Phase.ReturnToBase]: "return_to_base",
+  [Phase.ReturnToConcourse]: "return_to_concourse",
+  [Phase.Concourse]: "concourse",
+  [Phase.GateApproach]: "gate_approach",
   [Phase.Exit]: "exit",
 };
 const FIRST_SECTION_NUMBER = 201;
@@ -64,16 +64,9 @@ const GATE_INDEX = Object.fromEntries(GATE_IDS.map((id, index) => [id, index])) 
 const WALK_SPEED = 1.3;
 const MAX_STEP = 0.04;
 const METERS_PER_SCENE_UNIT = 6;
-const QUEUE_INNER_SCALE = 1.07;
-const QUEUE_OUTER_SCALE = 1.28;
-const GATE_PORTAL_SCALE = 1.32;
-const REROUTE_MARGIN_METERS = 12;
-const REROUTE_COOLDOWN_MINUTES = 0.5;
 
 interface Context {
   closedGates: Set<GateId>;
-  signals: Map<GateId, CongestionSnapshot["gates"][number]>;
-  plan: InterventionOption | null;
 }
 
 /** Seeded PRNG so agent layouts and movement are identical on every run. */
@@ -109,6 +102,7 @@ export class CrowdField {
   private scale: Float32Array;
   private timer: Float32Array;
   private target: Uint8Array;
+  private accessGate: Uint8Array;
   private ex: Float32Array;
   private ez: Float32Array;
   private dx: Float32Array;
@@ -117,7 +111,6 @@ export class CrowdField {
   private exitLen: Float32Array;
   private currentSpeedMps: Float32Array;
   private exitedAtSeconds: Float32Array;
-  private lastRerouteAt: Float32Array;
   private gateAngles: number[];
   private gateDest: [number, number][];
   private gateCapacity: number[];
@@ -125,9 +118,9 @@ export class CrowdField {
   private queues: number[][];
   private queueHead: Uint32Array;
   private heldUntil: Float32Array;
+  private closedGates = new Set<GateId>();
 
   time = -3;
-  routingMode: RoutingMode = "local";
 
   constructor(venue: VenueLayout, count: number) {
     this.venue = venue;
@@ -148,6 +141,7 @@ export class CrowdField {
     this.scale = new Float32Array(count);
     this.timer = new Float32Array(count);
     this.target = new Uint8Array(count);
+    this.accessGate = new Uint8Array(count);
     this.ex = new Float32Array(count);
     this.ez = new Float32Array(count);
     this.dx = new Float32Array(count);
@@ -156,7 +150,6 @@ export class CrowdField {
     this.exitLen = new Float32Array(count);
     this.currentSpeedMps = new Float32Array(count);
     this.exitedAtSeconds = new Float32Array(count).fill(-1);
-    this.lastRerouteAt = new Float32Array(count).fill(-100);
 
     const byId = Object.fromEntries(venue.gates.map((gate) => [gate.id, gate]));
     this.gateAngles = GATE_IDS.map((id) => byId[id].angleDeg);
@@ -175,6 +168,7 @@ export class CrowdField {
     this.gateCredit.fill(0);
     this.queueHead.fill(0);
     this.queues = GATE_IDS.map(() => []);
+    this.closedGates.clear();
     const sections = this.venue.sections;
     for (let i = 0; i < this.count; i += 1) {
       const sectionIndex = i % sections.length;
@@ -196,34 +190,30 @@ export class CrowdField {
       this.angle[i] = this.seatAngle[i];
       this.scale[i] = this.seatScale[i];
       this.target[i] = this.nearestGate(this.seatAngle[i]);
+      this.accessGate[i] = this.target[i];
       this.currentSpeedMps[i] = 0;
       this.exitedAtSeconds[i] = -1;
-      this.lastRerouteAt[i] = -100;
       this.writePosition(i, this.seatingHeight(this.scale[i]));
     }
     this.time = time;
   }
 
   /** Advance from the current time to `until`, in bounded sub-steps. */
-  advanceTo(until: number, snapshot: TwinSnapshot, congestion: CongestionSnapshot | null = null) {
+  advanceTo(until: number, snapshot: TwinSnapshot, _congestion: CongestionSnapshot | null = null) {
+    const context = this.context(snapshot);
+    this.closedGates = context.closedGates;
     let guard = 0;
     while (this.time < until - 1e-6 && guard < 2000) {
       const dt = Math.min(MAX_STEP, until - this.time);
       this.time += dt;
-      this.step(dt, this.context(snapshot, congestion));
+      this.step(dt, context);
       guard += 1;
     }
   }
 
-  private context(snapshot: TwinSnapshot, congestion: CongestionSnapshot | null): Context {
-    const plan =
-      snapshot.activePlan && this.time >= snapshot.activePlan.approvedAt
-        ? (snapshot.interventions.find((option) => option.id === snapshot.activePlan?.interventionId) ?? null)
-        : null;
+  private context(snapshot: TwinSnapshot): Context {
     return {
       closedGates: new Set(snapshot.gates.filter((gate) => gate.status === "closed").map((gate) => gate.id)),
-      signals: new Map(congestion?.gates.map((gate) => [gate.gateId, gate]) ?? []),
-      plan,
     };
   }
 
@@ -240,37 +230,56 @@ export class CrowdField {
     return best;
   }
 
-  private plannedGate(i: number, ctx: Context): number | null {
-    const reroute = ctx.plan?.reroute;
-    const sectionNumber = 201 + this.section[i];
-    if (!reroute || !reroute.sections.includes(sectionNumber)) return null;
-    const gate = GATE_INDEX[reroute.gate];
-    return ctx.closedGates.has(reroute.gate) ? null : gate;
-  }
-
   /**
-   * Execute Python routing deltas. People already exiting keep their gate;
-   * people in a gate corridor or queue walk back to the base path first.
+   * Execute operator-approved Python routing deltas only to currently open gates.
+   * Closure escape is a separate physical safety rule, not a plan approval.
    * Returns the number of people whose gate changed.
    */
-  applyAssignments(assignments: readonly RouteAssignment[]): number {
+  applyAssignments(assignments: readonly RouteAssignment[], closedGates: ReadonlySet<GateId> = this.closedGates): number {
+    this.closedGates = new Set(closedGates);
     let applied = 0;
-    for (const { personId, toGate } of assignments) {
-      if (personId < 0 || personId >= this.count) continue;
+    for (const { personId, toGate, reason } of assignments) {
+      if (reason !== "operator_plan" || !Number.isInteger(personId) || personId < 0 || personId >= this.count) continue;
       const phase = this.phase[personId];
       const gate = GATE_INDEX[toGate];
-      if (gate === undefined || phase >= Phase.Exit || this.target[personId] === gate) continue;
-      this.target[personId] = gate;
-      this.colorClass[personId] = AGENT_COLOR.rerouted;
-      this.lastRerouteAt[personId] = this.time;
-      if (phase === Phase.GateCorridor || phase === Phase.Queue) this.phase[personId] = Phase.ReturnToBase;
+      if (gate === undefined || closedGates.has(toGate) || phase >= Phase.Exit || this.target[personId] === gate) continue;
+      this.retarget(personId, gate);
       applied += 1;
     }
     return applied;
   }
 
+  private retarget(personId: number, gate: number) {
+    const phase = this.phase[personId];
+    this.target[personId] = gate;
+    this.colorClass[personId] = AGENT_COLOR.rerouted;
+    if (phase === Phase.Queue || phase === Phase.GateApproach || (phase === Phase.Concourse && this.scale[personId] > CONCOURSE_SCALE + 1e-4)) {
+      // Recover the actual rendered position before leaving a queue/doorway;
+      // the safety detour must never jump sideways or go through the stands.
+      const offset = personId * 3;
+      const point = ringCoords(this.venue.bowl.rx, this.venue.bowl.rz, this.positions[offset], this.positions[offset + 2]);
+      this.angle[personId] = point.angleDeg;
+      this.scale[personId] = point.scale;
+      this.phase[personId] = Phase.ReturnToConcourse;
+    }
+  }
+
+  /** Nearest reachable boundary exit along the walkable circle, with stable ties. */
+  private escapeClosedGate(personId: number, openGates: readonly number[]) {
+    if (openGates.length === 0) return;
+    const offset = personId * 3;
+    const angle = this.phase[personId] <= Phase.GateCorridor
+      ? this.gateAngles[this.accessGate[personId]]
+      : ringCoords(this.venue.bowl.rx, this.venue.bowl.rz, this.positions[offset], this.positions[offset + 2]).angleDeg;
+    const distances = openGates.map((gate) => Math.abs(angleDelta(angle, this.gateAngles[gate])));
+    const nearest = Math.min(...distances);
+    const tied = openGates.filter((_, index) => Math.abs(distances[index] - nearest) <= 1e-6);
+    this.retarget(personId, tied[personId % tied.length]);
+  }
+
   /** Keep seated people in the given sections from leaving until `untilSeconds` of simulation time. */
   setHolds(holds: readonly SectionHold[]) {
+    this.heldUntil.fill(-Infinity);
     for (const { section, untilSeconds } of holds) {
       const index = section - FIRST_SECTION_NUMBER;
       if (index < 0 || index >= this.heldUntil.length) continue;
@@ -278,49 +287,15 @@ export class CrowdField {
     }
   }
 
-  /** Load-aware routing driven by gate state and backend-confirmed congestion. */
-  private selectGate(i: number, ctx: Context): number {
-    const planned = this.plannedGate(i, ctx);
-    if (planned !== null) return planned;
-
-    const current = this.target[i];
-    if (this.routingMode === "backend") return current;
-    const currentId = GATE_IDS[current];
-    const signal = ctx.signals.get(currentId);
-    const closed = ctx.closedGates.has(currentId);
-    if (!closed && !signal?.congested) return current;
-    if (!closed && this.time - this.lastRerouteAt[i] < REROUTE_COOLDOWN_MINUTES) return current;
-
-    const open = GATE_IDS.map((id, gate) => ({ id, gate })).filter(({ id }) => !ctx.closedGates.has(id));
-    if (open.length === 0) return current;
-    const currentCost = this.routeCost(i, current, ctx);
-    const alternatives = open
-      .filter(({ gate }) => gate !== current)
-      .map(({ gate }) => ({ gate, cost: this.routeCost(i, gate, ctx) }))
-      .sort((a, b) => a.cost - b.cost || a.gate - b.gate);
-    const best = alternatives[0];
-    if (!best || (!closed && best.cost + REROUTE_MARGIN_METERS >= currentCost)) return current;
-    this.lastRerouteAt[i] = this.time;
-    return best.gate;
-  }
-
-  private routeCost(i: number, gate: number, ctx: Context): number {
-    const signal = ctx.signals.get(GATE_IDS[gate]);
-    const angleDistance = Math.abs(angleDelta(this.angle[i], this.gateAngles[gate])) * (Math.PI / 180);
-    const averageRadius = ((this.venue.bowl.rx + this.venue.bowl.rz) / 2) * this.venue.ring.basePath;
-    const walkingMeters = angleDistance * averageRadius * METERS_PER_SCENE_UNIT;
-    const queuePenalty = (signal?.queueLength ?? 0) * 0.12;
-    const densityPenalty = (signal?.densityPerM2 ?? 0) * 4;
-    const congestionPenalty = signal?.congested ? 20 : 0;
-    const stableTieBreaker = ((i * 17 + gate * 31) % 19) * 0.03;
-    return walkingMeters + queuePenalty + densityPenalty + congestionPenalty + stableTieBreaker;
-  }
-
   private step(dt: number, ctx: Context) {
     const { rx, rz } = this.venue.bowl;
     const baseScale = this.venue.ring.basePath;
+    const openGates = GATE_IDS.map((_, gate) => gate).filter((gate) => !ctx.closedGates.has(GATE_IDS[gate]));
 
     for (let i = 0; i < this.count; i += 1) {
+      if (this.phase[i] < Phase.Exit && ctx.closedGates.has(GATE_IDS[this.target[i]])) {
+        this.escapeClosedGate(i, openGates);
+      }
       const stepDistance = this.speed[i] * WALK_SPEED * dt;
       const baseSpeedMps = (this.speed[i] * WALK_SPEED * METERS_PER_SCENE_UNIT) / 60;
       const offset = i * 3;
@@ -349,12 +324,7 @@ export class CrowdField {
 
         case Phase.BaseRing: {
           this.currentSpeedMps[i] = baseSpeedMps;
-          const selected = this.selectGate(i, ctx);
-          if (selected !== this.target[i]) {
-            this.target[i] = selected;
-            this.colorClass[i] = AGENT_COLOR.rerouted;
-          }
-          if (this.moveAngle(i, this.gateAngles[this.target[i]], stepDistance, baseScale)) {
+          if (this.moveAngle(i, this.gateAngles[this.accessGate[i]], stepDistance, baseScale)) {
             this.phase[i] = Phase.GateCorridor;
           }
           this.scale[i] = baseScale;
@@ -364,29 +334,30 @@ export class CrowdField {
 
         case Phase.GateCorridor: {
           this.currentSpeedMps[i] = baseSpeedMps;
-          const selected = this.selectGate(i, ctx);
-          if (selected !== this.target[i]) {
-            this.target[i] = selected;
-            this.colorClass[i] = AGENT_COLOR.rerouted;
-            this.phase[i] = Phase.ReturnToBase;
-            break;
+          this.angle[i] = this.gateAngles[this.accessGate[i]];
+          this.scale[i] = Math.min(CONCOURSE_SCALE, this.scale[i] + stepDistance / 10);
+          if (this.scale[i] >= CONCOURSE_SCALE - 1e-4) {
+            this.scale[i] = CONCOURSE_SCALE;
+            this.phase[i] = Phase.Concourse;
           }
-          this.angle[i] = this.gateAngles[this.target[i]];
-          this.scale[i] = Math.min(QUEUE_INNER_SCALE, this.scale[i] + stepDistance / 10);
           this.writePosition(i, 0.02);
-          if (this.scale[i] >= QUEUE_INNER_SCALE - 1e-4) this.enterQueue(i);
+          break;
+        }
+
+        case Phase.Concourse: {
+          this.currentSpeedMps[i] = baseSpeedMps;
+          if (Math.abs(angleDelta(this.angle[i], this.gateAngles[this.target[i]])) > 1e-4) {
+            this.moveAngle(i, this.gateAngles[this.target[i]], stepDistance, CONCOURSE_SCALE);
+          } else {
+            this.scale[i] = Math.min(QUEUE_INNER_SCALE, this.scale[i] + stepDistance / 10);
+            if (this.scale[i] >= QUEUE_INNER_SCALE - 1e-4) this.enterQueue(i);
+          }
+          this.writePosition(i, 0.02);
           break;
         }
 
         case Phase.Queue: {
           this.currentSpeedMps[i] = 0;
-          const selected = this.selectGate(i, ctx);
-          if (selected !== this.target[i]) {
-            this.target[i] = selected;
-            this.colorClass[i] = AGENT_COLOR.rerouted;
-            this.phase[i] = Phase.ReturnToBase;
-            break;
-          }
           const gateAngle = this.gateAngles[this.target[i]] + (this.hashA[i] - 0.5) * 7;
           const queueScale = QUEUE_INNER_SCALE + this.hashB[i] * (QUEUE_OUTER_SCALE - QUEUE_INNER_SCALE);
           const [qx, qz] = ringPoint(rx, rz, gateAngle, queueScale);
@@ -398,21 +369,34 @@ export class CrowdField {
           break;
         }
 
-        case Phase.ReturnToBase:
+        case Phase.ReturnToConcourse:
           this.currentSpeedMps[i] = baseSpeedMps;
-          this.scale[i] = Math.max(baseScale, this.scale[i] - stepDistance / 10);
+          this.scale[i] = Math.max(CONCOURSE_SCALE, this.scale[i] - stepDistance / 10);
+          if (this.scale[i] <= CONCOURSE_SCALE + 1e-4) {
+            this.scale[i] = CONCOURSE_SCALE;
+            this.phase[i] = Phase.Concourse;
+          }
           this.writePosition(i, 0.02);
-          if (this.scale[i] <= baseScale + 1e-4) this.phase[i] = Phase.BaseRing;
           break;
 
+        case Phase.GateApproach:
         case Phase.Exit: {
+          const approaching = this.phase[i] === Phase.GateApproach;
+          if (approaching && ctx.closedGates.has(GATE_IDS[this.target[i]])) {
+            this.currentSpeedMps[i] = 0;
+            this.colorClass[i] = AGENT_COLOR.waiting;
+            break;
+          }
           this.currentSpeedMps[i] = baseSpeedMps;
           this.progress[i] += stepDistance;
           const progress = Math.min(1, this.progress[i] / this.exitLen[i]);
           this.positions[offset] = this.ex[i] + (this.dx[i] - this.ex[i]) * progress;
           this.positions[offset + 1] = 0.02;
           this.positions[offset + 2] = this.ez[i] + (this.dz[i] - this.ez[i]) * progress;
-          if (progress >= 1) this.markExited(i);
+          if (progress >= 1) {
+            if (approaching) this.beginOutsideWalk(i);
+            else this.markExited(i);
+          }
           break;
         }
 
@@ -458,7 +442,7 @@ export class CrowdField {
         const person = queue[this.queueHead[gate]];
         this.queueHead[gate] += 1;
         if (this.phase[person] !== Phase.Queue || this.target[person] !== gate) continue;
-        this.beginExit(person);
+        this.beginGateApproach(person);
         this.gateCredit[gate] -= 1;
       }
       if (this.queueHead[gate] > 512 && this.queueHead[gate] * 2 > queue.length) {
@@ -468,7 +452,7 @@ export class CrowdField {
     }
   }
 
-  private beginExit(i: number) {
+  private beginGateApproach(i: number) {
     const gate = this.target[i];
     const offset = i * 3;
     const [portalX, portalZ] = ringPoint(
@@ -477,6 +461,20 @@ export class CrowdField {
       this.gateAngles[gate],
       GATE_PORTAL_SCALE,
     );
+    this.ex[i] = this.positions[offset];
+    this.ez[i] = this.positions[offset + 2];
+    this.dx[i] = portalX;
+    this.dz[i] = portalZ;
+    this.exitLen[i] = Math.max(0.01, Math.hypot(portalX - this.ex[i], portalZ - this.ez[i]));
+    this.progress[i] = 0;
+    this.phase[i] = Phase.GateApproach;
+    this.colorClass[i] = AGENT_COLOR.normal;
+  }
+
+  /** Only a completed, open doorway crossing starts the outside walk. */
+  private beginOutsideWalk(i: number) {
+    const gate = this.target[i];
+    const offset = i * 3;
     const [destinationX, destinationZ] = this.gateDest[gate];
     this.ex[i] = this.positions[offset];
     this.ez[i] = this.positions[offset + 2];
@@ -486,10 +484,7 @@ export class CrowdField {
     const laneOffset = (this.hashA[i] - 0.5) * 1.1;
     this.dx[i] = destinationX + tangentX * laneOffset;
     this.dz[i] = destinationZ + tangentZ * laneOffset;
-    this.exitLen[i] =
-      Math.hypot(portalX - this.ex[i], portalZ - this.ez[i]) +
-      Math.hypot(this.dx[i] - portalX, this.dz[i] - portalZ);
-    this.exitLen[i] = Math.max(0.01, this.exitLen[i]);
+    this.exitLen[i] = Math.max(0.01, Math.hypot(this.dx[i] - this.ex[i], this.dz[i] - this.ez[i]));
     this.progress[i] = 0;
     this.phase[i] = Phase.Exit;
     this.colorClass[i] = AGENT_COLOR.normal;
@@ -513,7 +508,9 @@ export class CrowdField {
       [Phase.BaseRing]: "moving",
       [Phase.GateCorridor]: "moving",
       [Phase.Queue]: "queued",
-      [Phase.ReturnToBase]: "moving",
+      [Phase.ReturnToConcourse]: "moving",
+      [Phase.Concourse]: "moving",
+      [Phase.GateApproach]: "moving",
       [Phase.Exit]: "exiting",
     };
 
@@ -530,7 +527,7 @@ export class CrowdField {
         z: Math.round(this.positions[offset + 2] * 1_000) / 1_000,
         speedMps: Math.round(this.currentSpeedMps[i] * 100) / 100,
         targetGate,
-        movementState: movementState[this.phase[i]],
+        movementState: this.phase[i] === Phase.GateApproach && this.currentSpeedMps[i] === 0 ? "queued" : movementState[this.phase[i]],
         phase: PHASE_NAME[this.phase[i]],
       });
     }

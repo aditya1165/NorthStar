@@ -65,6 +65,7 @@ class CongestionDetector:
         self._last_sequence = -1
         self._trackers = {gate.gate_id: _GateTracker() for gate in gates}
         self._exited_ids: set[int] = set()
+        self._crossed_ids: set[int] = set()
 
     def ready(self) -> MonitoringReady:
         t = self._thresholds
@@ -104,7 +105,19 @@ class CongestionDetector:
             if exited.person_id in self._exited_ids:
                 continue
             self._exited_ids.add(exited.person_id)
-            self._trackers[exited.target_gate].exits.append(exited.exited_at_seconds)
+            # Compatibility with clients that only report completed outside walks.
+            # Modern clients already reported this person's boundary crossing.
+            if exited.person_id not in self._crossed_ids:
+                self._crossed_ids.add(exited.person_id)
+                self._trackers[exited.target_gate].exits.append(exited.exited_at_seconds)
+
+        for agent in batch.agents:
+            if agent.phase == "exit" and agent.person_id not in self._crossed_ids:
+                # `exit` begins only after reaching the open boundary doorway.
+                # Record its first observation, not the later disappearance at
+                # the outdoor destination; otherwise a closed gate appears to flow.
+                self._crossed_ids.add(agent.person_id)
+                self._trackers[agent.target_gate].exits.append(batch.simulation_time_seconds)
 
         if set(active_ids) & self._exited_ids:
             raise ValueError("An exited person cannot become active again within the same run")
@@ -128,6 +141,7 @@ class CongestionDetector:
         self._last_sequence = -1
         self._trackers = {gate.gate_id: _GateTracker() for gate in self._gates}
         self._exited_ids.clear()
+        self._crossed_ids.clear()
 
     def _measure_gate(
         self,
@@ -139,13 +153,18 @@ class CongestionDetector:
         inside = [
             agent
             for agent in batch.agents
-            if _inside_polygon(agent.x, agent.z, gate.approach_polygon)
+            if agent.phase != "exit" and _inside_polygon(agent.x, agent.z, gate.approach_polygon)
         ]
         area_m2 = _polygon_area(gate.approach_polygon) * METERS_PER_SCENE_UNIT**2
         density = len(inside) / area_m2
         mean_speed = sum(agent.speed_mps for agent in inside) / len(inside) if inside else 0.0
         queue = sum(
-            agent.target_gate == gate.gate_id and agent.speed_mps <= t.queue_speed_mps
+            agent.target_gate == gate.gate_id
+            and (
+                agent.movement_state == "queued"
+                if agent.phase is not None
+                else agent.speed_mps <= t.queue_speed_mps
+            )
             for agent in inside
         )
 
