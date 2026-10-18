@@ -1,10 +1,10 @@
-# CrowdGuardian
+# North Star
 
 **Spot the jam at Gate B before the crowd feels it, and send people somewhere better.**
 
 The match ends. 4,000 people stand up at once and head for eight exits. One gate closes, another starts backing up, and an operator has a few seconds to decide what to do.
 
-CrowdGuardian is a human-in-the-loop stadium crowd-management prototype built around that moment. The current application simulates exactly 4,000 people leaving a fictional stadium through eight controllable exits, streams every person's state to Python, detects persistent gate congestion, and reroutes affected people using an explainable deterministic cost function.
+North Star is a human-in-the-loop stadium crowd-management prototype built around that moment. The current application simulates exactly 4,000 people leaving a fictional stadium through eight controllable exits, streams every person's state to Python, detects persistent gate congestion, and reroutes affected people using an explainable deterministic cost function.
 
 > [!WARNING]
 > The project is intentionally a decision-support demonstrator. It is not certified evacuation software and must not be presented as guaranteed public-safety guidance.
@@ -307,7 +307,7 @@ North Star/
 
 ## 🚀 Getting started
 
-There are two ways to run CrowdGuardian: local development with two terminals, or the full stack in [Docker](#-docker).
+There are two ways to run North Star: local development with two terminals, or the full stack in [Docker](#-docker).
 
 ### Prerequisites
 
@@ -545,4 +545,4 @@ Detailed ownership and completion conditions are maintained in:
 - No facial recognition or personally identifiable information is required.
 - Detection thresholds and gate capacities are configurable demonstration assumptions.
 - Operator review remains mandatory for future real intervention recommendations.
-- CrowdGuardian must not claim certification, deployment readiness, or guaranteed safety.
+- North Star must not claim certification, deployment readiness, or guaranteed safety.
