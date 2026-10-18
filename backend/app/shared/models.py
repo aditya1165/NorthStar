@@ -29,6 +29,7 @@ class ZoneTelemetry(BaseModel):
     opposing_flow_ratio: float = Field(ge=0, le=1)
     risk_level: RiskLevel
     status: str = "open"
+    area_m2: float | None = Field(default=None, gt=0)
 
 
 class IncidentState(BaseModel):

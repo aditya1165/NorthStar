@@ -15,6 +15,9 @@ GateId = Literal[
     "gate_h",
 ]
 MovementState = Literal["waiting", "moving", "queued", "exiting", "transit_wait"]
+PhaseName = Literal[
+    "waiting", "row", "aisle", "base_ring", "gate_corridor", "queue", "return_to_base", "exit"
+]
 
 
 class AgentTelemetry(BaseModel):
@@ -24,6 +27,7 @@ class AgentTelemetry(BaseModel):
     speed_mps: float = Field(ge=0)
     target_gate: GateId
     movement_state: MovementState
+    phase: PhaseName | None = None
 
 
 class ExitedAgentTelemetry(BaseModel):
@@ -40,6 +44,7 @@ class TelemetryBatch(BaseModel):
     population: int = Field(default=4_000, ge=1)
     agents: list[AgentTelemetry]
     exited_agents: list[ExitedAgentTelemetry] = Field(default_factory=list)
+    closed_gates: list[GateId] = Field(default_factory=list)
 
 
 class GateCongestionState(BaseModel):
@@ -56,12 +61,65 @@ class GateCongestionState(BaseModel):
     reason: str
 
 
+class RouteAssignment(BaseModel):
+    person_id: int
+    from_gate: GateId
+    to_gate: GateId
+    reason: Literal["gate_closed", "congestion", "load_balance", "operator_plan"]
+    estimated_benefit_seconds: float
+
+
+class SectionHold(BaseModel):
+    section: int
+    until_seconds: float
+
+
+class RoutingUpdate(BaseModel):
+    assignments: list[RouteAssignment]
+    holds: list[SectionHold] = Field(default_factory=list)
+    gate_wait_seconds: dict[str, float | None]
+    redirected_total: int
+    active_plan_id: str | None = None
+
+
+class LiveZoneState(BaseModel):
+    zone_id: str
+    name: str
+    kind: str
+    gate_id: GateId | None = None
+    people_count: int
+    density_per_m2: float
+    inflow_per_min: float
+    outflow_per_min: float
+    mean_speed_mps: float
+    queue_length: int
+    level: RiskLevel
+    status: str
+
+
+class LiveZoneForecast(BaseModel):
+    zone_id: str
+    horizon_minutes: int
+    predicted_density: float
+    baseline_density: float
+    low: float
+    high: float
+    level: RiskLevel
+    risk_probability: float
+    time_to_congestion_minutes: float | None
+    method: Literal["baseline", "gbm"]
+    top_factors: list[str]
+
+
 class CongestionSnapshot(BaseModel):
     message_type: Literal["congestion"] = "congestion"
     run_id: str
     sequence: int
     simulation_time_seconds: float
     gates: list[GateCongestionState]
+    routing: RoutingUpdate | None = None
+    zones: list[LiveZoneState] | None = None
+    forecasts: list[LiveZoneForecast] | None = None
 
 
 class DetectorThresholdsResponse(BaseModel):

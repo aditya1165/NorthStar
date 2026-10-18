@@ -7,7 +7,9 @@ from pydantic import ValidationError
 from app.congestion import CongestionDetector, TelemetryBatch
 from app.congestion.models import ProtocolError
 from app.forecasting import ForecastService
+from app.live.registry import LiveRunRegistry, PlanStatus
 from app.response import ResponseService
+from app.response.rollouts import InterventionEvaluation
 from app.shared.models import ApprovalResponse, IncidentRequest, SimulationSnapshot
 from app.simulation import CrowdSimulation
 
@@ -27,6 +29,7 @@ app.add_middleware(
 simulation = CrowdSimulation()
 forecaster = ForecastService()
 response_service = ResponseService()
+live_runs = LiveRunRegistry()
 
 
 @app.get("/health")
@@ -97,18 +100,59 @@ async def telemetry_socket(websocket: WebSocket) -> None:
         return
 
 
+@app.get("/api/runs")
+def list_runs() -> list[str]:
+    return live_runs.run_ids()
+
+
+@app.post("/api/runs/{run_id}/interventions/evaluate", response_model=InterventionEvaluation)
+def evaluate_run_interventions(run_id: str) -> InterventionEvaluation:
+    """Run isolated multi-seed counterfactual rollouts from the run's latest telemetry."""
+    try:
+        return live_runs.evaluate(run_id)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail=f"Unknown run {run_id}") from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.post("/api/runs/{run_id}/interventions/{intervention_id}/approve", response_model=PlanStatus)
+def approve_run_intervention(run_id: str, intervention_id: str) -> PlanStatus:
+    try:
+        return live_runs.approve(run_id, intervention_id)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail=f"Unknown run {run_id}") from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@app.delete("/api/runs/{run_id}/plan", status_code=204)
+def clear_run_plan(run_id: str) -> None:
+    try:
+        live_runs.clear_plan(run_id)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail=f"Unknown run {run_id}") from error
+
+
+@app.get("/api/runs/{run_id}/export")
+def export_run(run_id: str) -> dict:
+    try:
+        return live_runs.export(run_id)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail=f"Unknown run {run_id}") from error
+
+
 @app.websocket("/ws/congestion")
 async def congestion_socket(websocket: WebSocket) -> None:
-    """Receive per-person frontend telemetry and return backend-owned gate detection."""
+    """Receive per-person telemetry; return detection, routing deltas, zones, and forecasts."""
     await websocket.accept()
-    detector = CongestionDetector()
-    await websocket.send_json(detector.ready().model_dump(mode="json"))
+    await websocket.send_json(CongestionDetector().ready().model_dump(mode="json"))
     try:
         while True:
             payload = await websocket.receive_json()
             try:
                 batch = TelemetryBatch.model_validate(payload)
-                result = detector.process(batch)
+                result = await asyncio.to_thread(live_runs.process, batch)
             except (ValidationError, ValueError) as error:
                 await websocket.send_json(
                     ProtocolError(detail=str(error)).model_dump(mode="json")
