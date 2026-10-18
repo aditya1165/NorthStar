@@ -5,6 +5,7 @@ import { cn } from "../../lib/cn";
 import { formatClock, STAGE_LABEL } from "../domain/risk";
 import type { InterventionOption } from "../domain/types";
 import { selectedIntervention, useTwinStore } from "../state/twinStore";
+import { LiveResponsePanel } from "./LiveResponses";
 import { RiskTag, SectionTitle } from "./primitives";
 
 function useDecision() {
@@ -216,6 +217,8 @@ export function DecisionPanel({ className }: { className?: string }) {
 
 export function InterventionPanelSection() {
   const modifying = useTwinStore((s) => s.modifying);
+  const backendLive = useTwinStore((s) => s.congestionConnection === "connected" && Boolean(s.congestion?.routing));
+  if (backendLive) return <LiveResponsePanel />;
   return (
     <section aria-label="Intervention comparison" className="grid min-w-0 gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_260px]">
       <div className={cn("min-w-0 space-y-2 rounded-md", modifying && "outline outline-1 outline-offset-4 outline-violet/50")}>

@@ -109,6 +109,8 @@ class FlowBaseline:
         )
 
     def _infer_zone_area(self, zone: ZoneTelemetry) -> float:
+        if zone.area_m2:
+            return zone.area_m2
         if zone.people_count > 0 and zone.density_estimate > 0:
             return zone.people_count / zone.density_estimate
         return self.config.default_zone_area_m2
@@ -161,6 +163,7 @@ class FlowBaseline:
         incident_pressure = float(
             (snapshot.incidents.gate_b_closed and zone.zone_id == "north_concourse")
             or (snapshot.incidents.metro_delayed and zone.zone_id == "metro_plaza")
+            or zone.status == "closed"
         )
 
         probability = (
@@ -204,6 +207,8 @@ class FlowBaseline:
             factors.append("outflow exceeds inflow")
         if snapshot.incidents.gate_b_closed and zone.zone_id == "north_concourse":
             factors.append("Gate B unavailable")
+        if zone.status == "closed":
+            factors.append("gate closed")
         if snapshot.incidents.metro_delayed and zone.zone_id in {
             "north_concourse",
             "metro_plaza",

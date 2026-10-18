@@ -23,6 +23,10 @@ data/generated/*
 data/models/*
 !data/models/.gitkeep
 
+# Markdown (keep the project README)
+*.md
+!README.md
+
 # Environment and editor files
 .env
 .env.*
