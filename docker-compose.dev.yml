@@ -1,0 +1,39 @@
+# Use with: docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build --wait
+# Same public port and proxy paths as the built stack, with source hot reload.
+name: northstar-dev
+
+services:
+  backend:
+    image: northstar-backend:dev
+    build:
+      target: development
+    restart: "no"
+    read_only: false
+    environment:
+      WATCHFILES_FORCE_POLLING: "true"
+    volumes:
+      - ./backend/app:/app/backend/app:ro
+      - ./backend/scripts:/app/backend/scripts:ro
+      - ./backend/tests:/app/backend/tests:ro
+      - ./shared:/app/shared:ro
+
+  frontend:
+    image: northstar-frontend:dev
+    build:
+      target: development
+    restart: "no"
+    read_only: false
+    environment:
+      API_PROXY_TARGET: http://backend:8000
+      # Blank means same-origin. Do not let a host .env redirect Docker clients.
+      VITE_API_URL: ""
+      VITE_CONGESTION_WS_URL: ""
+      npm_config_cache: /tmp/npm
+    command: ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "8080", "--strictPort"]
+    volumes:
+      - ./frontend/src:/app/frontend/src:ro
+      - ./frontend/index.html:/app/frontend/index.html:ro
+      - ./frontend/vite.config.ts:/app/frontend/vite.config.ts:ro
+      - ./shared:/app/shared:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"]

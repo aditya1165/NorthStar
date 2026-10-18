@@ -1,3 +1,4 @@
+import { congestionWebSocketUrl } from "../../lib/endpoints";
 import type { GateId, RiskLevel } from "../domain/types";
 import type {
   CongestionConnectionStatus,
@@ -9,6 +10,8 @@ import type {
   RouteReason,
   RoutingUpdate,
 } from "./types";
+
+export { apiBaseUrl } from "../../lib/endpoints";
 
 interface CongestionClientHandlers {
   onConnection(status: CongestionConnectionStatus): void;
@@ -84,12 +87,6 @@ interface WireCongestionSnapshot {
 }
 
 const RECONNECT_MS = 2_000;
-
-function websocketUrl(): string {
-  const configured = import.meta.env.VITE_CONGESTION_WS_URL as string | undefined;
-  if (configured) return configured;
-  return `${apiBaseUrl().replace(/^http/, "ws")}/ws/congestion`;
-}
 
 function gateState(value: WireGateState): GateCongestionState {
   return {
@@ -204,10 +201,6 @@ function wireBatch(batch: CongestionTelemetryBatch) {
   };
 }
 
-export function apiBaseUrl(): string {
-  return (import.meta.env.VITE_API_URL as string | undefined) ?? "http://localhost:8000";
-}
-
 /** One reconnecting WebSocket dedicated to backend-owned congestion detection. */
 export class CongestionClient {
   private socket: WebSocket | null = null;
@@ -251,7 +244,7 @@ export class CongestionClient {
   private open(): void {
     if (this.disposed || !this.handlers) return;
     this.handlers.onConnection("connecting");
-    const socket = new WebSocket(websocketUrl());
+    const socket = new WebSocket(congestionWebSocketUrl());
     this.socket = socket;
 
     socket.addEventListener("message", (event) => {

@@ -6,11 +6,10 @@ import {
   type InterventionResult,
   type SimulationSnapshot,
 } from "../types/contracts";
-
-const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+import { apiBaseUrl } from "./endpoints";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_URL}${path}`, {
+  const response = await fetch(`${apiBaseUrl()}${path}`, {
     headers: { "Content-Type": "application/json" },
     ...init,
   });

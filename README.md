@@ -275,7 +275,7 @@ For local development:
 - npm;
 - a browser with WebGL support.
 
-Docker Desktop or another Docker Compose implementation is optional.
+Alternatively, run the whole application with Docker Engine and Docker Compose v2.20+ (or Docker Desktop). No host Python or Node installation is required for the Docker workflow.
 
 ## Local Development
 
@@ -311,18 +311,20 @@ npm run dev
 
 Open `http://localhost:5173/`.
 
-The default URLs already work without a local environment file. For custom endpoints:
+The browser uses same-origin `/api` and `/ws` URLs. Vite forwards these to `http://127.0.0.1:8000`, so no environment file is needed. For custom endpoints:
 
 ```bash
 cd frontend
-cp ../.env.example .env
+cp .env.example .env
 ```
 
 Supported frontend variables:
 
-- `VITE_API_URL` — base URL for the REST dashboard;
-- `VITE_WS_URL` — legacy zone-snapshot WebSocket;
-- `VITE_CONGESTION_WS_URL` — live per-person congestion WebSocket.
+- `API_PROXY_TARGET` — backend destination for the Vite development proxy (server-side only);
+- `VITE_API_URL` — optional external API base URL for both application modes;
+- `VITE_CONGESTION_WS_URL` — optional external congestion WebSocket URL.
+
+Leave the `VITE_*` values blank for same-origin requests. The WebSocket automatically uses `wss://` when the page uses HTTPS. These values are public build-time settings, never secrets. Remove old `localhost:8000` overrides from an existing `frontend/.env` when using the proxy defaults.
 
 Never commit `.env` files containing local or secret values. The repository tracks only `.env.example`.
 
@@ -416,30 +418,46 @@ docker compose config --quiet
 
 At the time of this README update, the suite contains:
 
-- 15 backend tests;
-- 11 frontend unit tests;
-- four Playwright browser tests.
+- 36 backend test cases;
+- 23 frontend unit tests;
+- four existing Playwright browser tests and one opt-in real-stack browser test;
+- a Docker smoke test covering HTTP, WebSockets, congestion, and rerouting.
 
 The frontend production build currently emits a non-blocking large-chunk warning for the 3D bundles.
 
 ## Docker
 
-Build and run both services from the repository root:
+Start Docker Desktop (or Docker Engine), then run from the repository root:
 
 ```bash
-docker compose up --build
+docker compose up --build --wait
 ```
 
-Then open:
+Open **http://localhost:8080**. This serves the existing stadium UI, REST API, and WebSockets through one origin. The backend is private to the Compose network, not exposed on host port 8000.
 
-- frontend: `http://localhost:5173`;
-- backend documentation: `http://localhost:8000/docs`.
+- API documentation: `http://localhost:8080/docs`
+- Frontend health: `http://localhost:8080/health`
+- Backend health through the proxy: `http://localhost:8080/api/health`
 
-Stop the stack with:
+Check the complete connection, including real 4,000-person telemetry and gate rerouting:
 
 ```bash
-docker compose down
+docker compose run --rm smoke
 ```
+
+The smoke test creates an isolated synthetic run. It does not train a model, run intervention rollouts, or reset another simulation.
+
+Both application containers run as non-root users with read-only runtime filesystems, limited writable paths, health checks, and rotated logs. The frontend waits for backend readiness. Datasets and models persist in the `backend-data` named volume. Active simulation sessions remain in memory and reset when the backend restarts, so keep exactly one backend process and replica.
+
+For source hot reload, use the development override:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build --wait
+```
+
+This also uses port 8080. Stop the normal stack first, or set `FRONTEND_PORT=8081` for a second stack. Development uses a separate Compose project and data volume.
+
+See [the Docker runbook](docs/DOCKER.md) for configuration, containerized tests, data/model management, troubleshooting, shutdown, and deployment limitations. The Docker setup does not change the stadium design.
 
 ## Immediate Roadmap
 

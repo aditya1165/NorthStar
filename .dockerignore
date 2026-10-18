@@ -1,0 +1,37 @@
+# Allow only application build inputs into the context.
+# In particular: never send .git, local secrets, datasets, decks or recordings.
+**
+!backend/
+!backend/**
+!frontend/
+!frontend/**
+!shared/
+!shared/**
+
+**/node_modules
+**/.venv
+**/venv
+**/__pycache__
+**/*.py[cod]
+**/*.egg-info
+**/.pytest_cache
+**/.ruff_cache
+**/.mypy_cache
+**/.coverage*
+**/coverage
+**/htmlcov
+**/dist
+**/build
+**/.vite
+**/*.tsbuildinfo
+**/*.log
+**/.DS_Store
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/playwright-report
+**/test-results
+**/blob-report
+frontend/vite.config.js
+frontend/vite.config.d.ts

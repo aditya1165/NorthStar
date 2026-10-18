@@ -81,6 +81,7 @@ data/generated/*
 data/models/*
 !data/models/.gitkeep
 data/exports/
+data/backups/
 *.joblib
 *.onnx
 
