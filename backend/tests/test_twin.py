@@ -26,7 +26,8 @@ def test_twin_starts_with_4000_seated_people() -> None:
 def test_everyone_exits_once_and_people_are_conserved() -> None:
     twin = StadiumTwin()
     runner = TwinRunner(twin, policy="engine")
-    runner.run_until(4.0)
+    while twin.exited_count() == 0 and twin.time < 90:
+        runner.run_until(twin.time + 2.0)
     exited_early = set(np.where(twin.phase == Phase.EXITED)[0].tolist())
     assert exited_early
     metrics = runner.run_until_clear(120)

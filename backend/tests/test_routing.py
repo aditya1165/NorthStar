@@ -44,21 +44,26 @@ def test_deltas_only_contain_people_whose_gate_changes() -> None:
 
 def test_congestion_reassignments_respect_cooldown() -> None:
     twin = StadiumTwin()
-    TwinRunner(twin).run_until(3.0)
+    busiest = 0
+    packed = np.arange(400)
+    twin.phase[packed] = Phase.QUEUE
+    twin.target[packed] = busiest
+    twin.time = 5.0
     congested = np.zeros(len(GATE_IDS), dtype=bool)
-    busiest = int(np.argmax(twin.queued_per_gate()))
     congested[busiest] = True
     signals = GateSignals(queue=twin.queued_per_gate(), density=np.zeros(8), congested=congested)
     engine = RoutingEngine()
+    now = twin.time * 60
 
-    first = _decide(engine, twin, 180.0, signals)
+    first = _decide(engine, twin, now, signals)
     moved = {a.person_id for a in first.assignments if a.reason == "congestion"}
     assert moved
     ids = np.array([a.person_id for a in first.assignments])
     twin.apply_assignments(ids, np.array([a.to_gate for a in first.assignments]))
 
     twin.target[list(moved)] = busiest  # simulate people drifting back before the cooldown expires
-    second = _decide(engine, twin, 180.0 + COOLDOWN_SECONDS / 2, signals)
+    twin.phase[list(moved)] = Phase.QUEUE
+    second = _decide(engine, twin, now + COOLDOWN_SECONDS / 2, signals)
     assert not moved & {a.person_id for a in second.assignments if a.reason != "gate_closed"}
 
 
