@@ -62,7 +62,7 @@ test("shows the operator decision flow", async ({ page }) => {
       ],
     }),
   );
-  await page.goto("/");
+  await page.goto("/?mode=live");
   await expect(page.getByText("CrowdGuardian")).toBeVisible();
   await expect(page.getByText("Recommendation ready")).toBeVisible();
   await expect(page.getByRole("button", { name: "Approve action" })).toBeEnabled();
