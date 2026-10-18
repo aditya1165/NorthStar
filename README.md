@@ -1,12 +1,61 @@
 # CrowdGuardian
 
-CrowdGuardian is a human-in-the-loop stadium crowd-management prototype. The current application simulates exactly 4,000 people leaving a fictional stadium through eight controllable exits, streams every person's state to Python, detects persistent gate congestion, and reroutes affected people using an explainable deterministic cost function.
+**Spot the jam at Gate B before the crowd feels it, and send people somewhere better.**
 
-The project is intentionally a decision-support demonstrator. It is not certified evacuation software and must not be presented as guaranteed public-safety guidance.
+The match ends. 4,000 people stand up at once and head for eight exits. One gate closes, another starts backing up, and an operator has a few seconds to decide what to do.
 
-## Current Status
+CrowdGuardian is a human-in-the-loop stadium crowd-management prototype built around that moment. The current application simulates exactly 4,000 people leaving a fictional stadium through eight controllable exits, streams every person's state to Python, detects persistent gate congestion, and reroutes affected people using an explainable deterministic cost function.
+
+> [!WARNING]
+> The project is intentionally a decision-support demonstrator. It is not certified evacuation software and must not be presented as guaranteed public-safety guidance.
+
+## 📍 At a glance
+
+| | |
+| --- | --- |
+| **Population** | Exactly 4,000 stable logical person identities per simulation run |
+| **Exits** | Eight controllable gates, Gate A through Gate H |
+| **Seating** | Twenty-four seating sections |
+| **Telemetry** | Complete per-person snapshot from React to FastAPI once per real second |
+| **Detection** | Python-owned gate density, queue, speed, throughput, persistence, and clearing |
+| **Rerouting** | Deterministic and explainable; currently applied in the browser |
+| **Forecasts and interventions** | Mock or formula-driven in the default 3D experience |
+| **Status** | Hybrid prototype: movement and congestion are integrated; forecasting and intervention planning are only partially connected |
+
+## Contents
+
+- [📍 At a glance](#-at-a-glance)
+- [🧱 Current status](#-current-status)
+- [🧭 System architecture](#-system-architecture)
+- [👥 Stadium and person model](#-stadium-and-person-model)
+- [🚦 Congestion detection](#-congestion-detection)
+- [🔀 Current rerouting logic](#-current-rerouting-logic)
+- [📡 Telemetry contract](#-telemetry-contract)
+- [💻 Application modes](#-application-modes)
+- [📁 Repository layout](#-repository-layout)
+- [🚀 Getting started](#-getting-started)
+- [🎬 Running the demo](#-running-the-demo)
+- [🔌 Backend interfaces](#-backend-interfaces)
+- [📈 Deterministic forecast baseline](#-deterministic-forecast-baseline)
+- [🧪 Tests and quality checks](#-tests-and-quality-checks)
+- [🐳 Docker](#-docker)
+- [📌 Immediate roadmap](#-immediate-roadmap)
+- [🔒 Safety and privacy](#-safety-and-privacy)
+
+## 🧱 Current status
 
 The repository is a hybrid prototype: the movement and congestion path is integrated, while forecasting and intervention planning are only partially connected.
+
+| Area | State | Where |
+| --- | --- | --- |
+| 4,000-person movement, gate queues, operator gate control | ✅ Implemented and connected | React `CrowdField` |
+| Live per-gate congestion detection | ✅ Implemented and connected | FastAPI `CongestionDetector` over `/ws/congestion` |
+| Deterministic rerouting | ✅ Implemented and connected, browser-owned | React `CrowdField` |
+| Mass-balance forecast baseline | 🟡 Real algorithm, not connected to the 3D stream | `backend/app/forecasting/baseline.py` |
+| Synthetic zone-level simulation | 🟡 Real, exposed over REST only | `backend/app/simulation/` |
+| Scenario clock, forecasts, interventions in the 3D page | ⚪ Mocked | `MockTwinService`, `MockScenarioEngine` |
+| Python `ResponseService` | ⚪ Formula-based placeholder | `backend/app/response/` |
+| Python-owned routing, live forecasts, dataset, ML, rollouts | ⏳ Pending | See below and the roadmap |
 
 ### Implemented and connected
 
@@ -61,37 +110,35 @@ The Python `ResponseService` is also a deterministic formula-based placeholder. 
 
 See [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md) for the canonical architecture, ordered TODO, ownership, and acceptance criteria.
 
-## System Architecture
+## 🧭 System architecture
 
-The default application at `/` follows this path:
+The default application at `/` follows the solid path below. Dashed edges show the intended next architecture, which moves the final decision boundary into Python.
 
-```text
-MockTwinService
-  scenario clock, scripted incidents, mock forecasts and recommendations
-        |
-        v
-CrowdField in React
-  4,000 real logical agents, aisle movement, FIFO queues and exit lifecycle
-        |
-        | complete person snapshot every real second
-        v
-ws://localhost:8000/ws/congestion
-        |
-        v
-FastAPI CongestionDetector
-  validation, approach geometry, density, queue, speed, throughput, hysteresis
-        |
-        | eight gate results
-        v
-Existing React operator UI
-  live detector state, alerts, gate metrics and 3D gate highlighting
-        |
-        v
-CrowdField
-  currently applies deterministic rerouting in the browser
+```mermaid
+flowchart TD
+    Mock["<b>MockTwinService</b><br/>scenario clock, scripted incidents,<br/>mock forecasts and recommendations"]
+    Field["<b>CrowdField in React</b><br/>4,000 real logical agents, aisle movement,<br/>FIFO queues and exit lifecycle"]
+    WS["<b>ws://localhost:8000/ws/congestion</b>"]
+    Detector["<b>FastAPI CongestionDetector</b><br/>validation, approach geometry, density,<br/>queue, speed, throughput, hysteresis"]
+    UI["<b>Existing React operator UI</b><br/>live detector state, alerts, gate metrics<br/>and 3D gate highlighting"]
+    Reroute["<b>CrowdField</b><br/>currently applies deterministic<br/>rerouting in the browser"]
+    RouteCost["<b>Python route-cost evaluation</b><br/>planned"]
+    Execute["<b>React executes and visualizes assignments</b><br/>planned"]
+
+    Mock --> Field
+    Field -- "complete person snapshot every real second" --> WS
+    WS --> Detector
+    Detector -- "eight gate results" --> UI
+    UI --> Reroute
+
+    Detector -. "planned: Python detection feeds routing" .-> RouteCost
+    RouteCost -. "changed person-to-gate assignments" .-> Execute
+
+    classDef planned stroke-dasharray: 5 5;
+    class RouteCost,Execute planned;
 ```
 
-The intended next architecture moves the final decision boundary:
+Planned flow, step by step:
 
 ```text
 React movement telemetry
@@ -103,13 +150,13 @@ React movement telemetry
 
 No ML model is required for gate reassignment. The routing cost can remain deterministic and explainable. ML is reserved for future congestion forecasting after a suitable simulation dataset exists.
 
-## Stadium and Person Model
+## 👥 Stadium and person model
 
 The shared configuration is [shared/stadium-config.json](shared/stadium-config.json). It defines:
 
 - population and coordinate scale;
 - stadium bowl and circulation-ring geometry;
-- Gate A–H identifiers, labels, and angles;
+- Gate A to H identifiers, labels, and angles;
 - default gate capacity;
 - gate-approach geometry used by the Python detector.
 
@@ -130,7 +177,7 @@ waiting in seat
 
 Movement is a deterministic waypoint model. It does not currently implement physical person-to-person collision forces. This keeps the first milestone reproducible and makes queue and route behavior easier to test.
 
-## Congestion Detection
+## 🚦 Congestion detection
 
 The backend constructs all eight approach polygons from the shared stadium configuration. For every telemetry batch it calculates:
 
@@ -142,22 +189,24 @@ The backend constructs all eight approach polygons from the shared stadium confi
 - raw risk level;
 - persistent congestion and clearing state.
 
-Current prototype defaults include:
+Current prototype defaults:
 
-- elevated density: 2.2 people/m²;
-- high density: 3.2 people/m²;
-- critical density: 4.5 people/m²;
-- elevated queue: 40 people;
-- high queue: 80 people;
-- critical queue: 160 people;
-- queue-speed threshold: 0.6 m/s;
-- critical-speed threshold: 0.35 m/s;
-- congestion persistence: 5 simulated seconds;
-- clear persistence: 10 simulated seconds.
+| Signal | Elevated | High | Critical |
+| --- | --- | --- | --- |
+| Approach density | 2.2 people/m² | 3.2 people/m² | 4.5 people/m² |
+| Queue length | 40 people | 80 people | 160 people |
 
-These thresholds are engineering defaults for the prototype. They are not certified crowd-safety limits.
+| Setting | Value |
+| --- | --- |
+| Queue-speed threshold | 0.6 m/s |
+| Critical-speed threshold | 0.35 m/s |
+| Congestion persistence | 5 simulated seconds |
+| Clear persistence | 10 simulated seconds |
 
-## Current Rerouting Logic
+> [!IMPORTANT]
+> These thresholds are engineering defaults for the prototype. They are not certified crowd-safety limits.
+
+## 🔀 Current rerouting logic
 
 A person becomes eligible for reassignment when the assigned gate is closed or Python confirms persistent congestion at that gate.
 
@@ -173,18 +222,20 @@ walking-distance cost
 
 A switching margin and cooldown reduce oscillation. The next milestone will move this scoring into Python and return only changed assignments to React.
 
-## Telemetry Contract
+## 📡 Telemetry contract
 
 The frontend sends `message_type: "telemetry"` over `/ws/congestion` once per real second.
 
 Every batch contains:
 
-- `run_id` — stable for one simulation epoch;
-- `sequence` — strictly increasing within the run;
-- `simulation_time_seconds` — simulated, not wall-clock, time;
-- `population` — must equal 4,000;
-- `agents` — every currently active identity;
-- `exited_agents` — every identity already removed from the run.
+| Field | Meaning and validation |
+| --- | --- |
+| `run_id` | Stable for one simulation epoch |
+| `sequence` | Strictly increasing within the run |
+| `simulation_time_seconds` | Simulated, not wall-clock, time |
+| `population` | Must equal 4,000 |
+| `agents` | Every currently active identity |
+| `exited_agents` | Every identity already removed from the run |
 
 An active person contains:
 
@@ -211,29 +262,17 @@ An exited person contains:
 
 The backend returns one congestion record for each of the eight gates. Protocol validation errors are returned as structured WebSocket error messages without terminating the connection.
 
-## Application Modes
+## 💻 Application modes
 
-### Default 3D stadium
+| Mode | URL | What it shows |
+| --- | --- | --- |
+| **Default 3D stadium** | `http://localhost:5173/` | The main experience. It contains the 4,000-person frontend simulation and the live `/ws/congestion` integration. |
+| **Legacy REST dashboard** | `http://localhost:5173/?mode=live` | The separate Python `CrowdSimulation` zone model through REST. |
 
-Open:
+> [!NOTE]
+> Despite the historical query name, `?mode=live` is not the live 3D person stream. It is useful for exercising the baseline forecast and response API contracts, but it should not be used to claim end-to-end 3D forecast integration.
 
-```text
-http://localhost:5173/
-```
-
-This is the main experience. It contains the 4,000-person frontend simulation and the live `/ws/congestion` integration.
-
-### Legacy REST dashboard
-
-Open:
-
-```text
-http://localhost:5173/?mode=live
-```
-
-Despite the historical query name, this is not the live 3D person stream. It displays the separate Python `CrowdSimulation` zone model through REST. It is useful for exercising the baseline forecast and response API contracts, but it should not be used to claim end-to-end 3D forecast integration.
-
-## Repository Layout
+## 📁 Repository layout
 
 ```text
 North Star/
@@ -266,18 +305,16 @@ North Star/
 └── docker-compose.yml
 ```
 
-## Prerequisites
+## 🚀 Getting started
 
-For local development:
+There are two ways to run CrowdGuardian: local development with two terminals, or the full stack in [Docker](#-docker).
 
-- Python 3.11 or newer;
-- Node.js 22 or a current compatible LTS release;
-- npm;
-- a browser with WebGL support.
+### Prerequisites
 
-Alternatively, run the whole application with Docker Engine and Docker Compose v2.20+ (or Docker Desktop). No host Python or Node installation is required for the Docker workflow.
-
-## Local Development
+| Workflow | Requirements |
+| --- | --- |
+| Local development | Python 3.11 or newer; Node.js 22 or a current compatible LTS release; npm; a browser with WebGL support |
+| Docker | Docker Engine and Docker Compose v2.20+ (or Docker Desktop). No host Python or Node installation is required. |
 
 ### 1. Start the Python backend
 
@@ -311,6 +348,8 @@ npm run dev
 
 Open `http://localhost:5173/`.
 
+### 3. Optional: custom endpoints
+
 The browser uses same-origin `/api` and `/ws` URLs. Vite forwards these to `http://127.0.0.1:8000`, so no environment file is needed. For custom endpoints:
 
 ```bash
@@ -320,15 +359,18 @@ cp .env.example .env
 
 Supported frontend variables:
 
-- `API_PROXY_TARGET` — backend destination for the Vite development proxy (server-side only);
-- `VITE_API_URL` — optional external API base URL for both application modes;
-- `VITE_CONGESTION_WS_URL` — optional external congestion WebSocket URL.
+| Variable | Purpose |
+| --- | --- |
+| `API_PROXY_TARGET` | Backend destination for the Vite development proxy (server-side only) |
+| `VITE_API_URL` | Optional external API base URL for both application modes |
+| `VITE_CONGESTION_WS_URL` | Optional external congestion WebSocket URL |
 
-Leave the `VITE_*` values blank for same-origin requests. The WebSocket automatically uses `wss://` when the page uses HTTPS. These values are public build-time settings, never secrets. Remove old `localhost:8000` overrides from an existing `frontend/.env` when using the proxy defaults.
+Leave the `VITE_*` values blank for same-origin requests. The WebSocket automatically uses `wss://` when the page uses HTTPS. Remove old `localhost:8000` overrides from an existing `frontend/.env` when using the proxy defaults.
 
-Never commit `.env` files containing local or secret values. The repository tracks only `.env.example`.
+> [!CAUTION]
+> `VITE_*` values are public build-time settings, never secrets. Never commit `.env` files containing local or secret values. The repository tracks only `.env.example`.
 
-## Running the Demo
+## 🎬 Running the demo
 
 1. Start the backend and frontend.
 2. Confirm the header shows `Detector live`.
@@ -340,29 +382,37 @@ Never commit `.env` files containing local or secret values. The repository trac
 8. Inspect the live gate density, queue, mean speed, throughput, incident strip, and 3D gate highlight.
 9. Reopen a gate or reset the run.
 
-Forecast curves and intervention comparisons shown during this flow remain mock scenario outputs until the live forecast and counterfactual milestones are completed.
+> [!NOTE]
+> Forecast curves and intervention comparisons shown during this flow remain mock scenario outputs until the live forecast and counterfactual milestones are completed.
 
-## Backend Interfaces
+## 🔌 Backend interfaces
 
-Health and legacy REST demo:
+<details>
+<summary><b>Health and legacy REST demo</b> (10 endpoints)</summary>
 
-- `GET /health`
-- `GET /api/state`
-- `POST /api/simulation/start`
-- `POST /api/simulation/step`
-- `POST /api/simulation/pause`
-- `POST /api/simulation/reset`
-- `POST /api/incidents/{incident}`
-- `GET /api/forecasts`
-- `GET /api/interventions`
-- `POST /api/interventions/{intervention_id}/approve`
+| Method | Path |
+| --- | --- |
+| `GET` | `/health` |
+| `GET` | `/api/state` |
+| `POST` | `/api/simulation/start` |
+| `POST` | `/api/simulation/step` |
+| `POST` | `/api/simulation/pause` |
+| `POST` | `/api/simulation/reset` |
+| `POST` | `/api/incidents/{incident}` |
+| `GET` | `/api/forecasts` |
+| `GET` | `/api/interventions` |
+| `POST` | `/api/interventions/{intervention_id}/approve` |
+
+</details>
 
 WebSockets:
 
-- `/ws/congestion` — active 3D per-person input and eight-gate congestion output;
-- `/ws/telemetry` — legacy synthetic zone-snapshot output.
+| Path | Role |
+| --- | --- |
+| `/ws/congestion` | Active 3D per-person input and eight-gate congestion output |
+| `/ws/telemetry` | Legacy synthetic zone-snapshot output |
 
-## Deterministic Forecast Baseline
+## 📈 Deterministic forecast baseline
 
 The backend baseline extends the current zone mass balance:
 
@@ -382,7 +432,7 @@ python -m scripts.run_baseline --gate-b-closed --metro-delayed --steps 8
 
 This algorithm is implemented and tested, but the default 3D application does not yet supply it with live rolling zone histories.
 
-## Tests and Quality Checks
+## 🧪 Tests and quality checks
 
 Run backend tests and linting:
 
@@ -418,14 +468,17 @@ docker compose config --quiet
 
 At the time of this README update, the suite contains:
 
-- 36 backend test cases;
-- 23 frontend unit tests;
-- four existing Playwright browser tests and one opt-in real-stack browser test;
-- a Docker smoke test covering HTTP, WebSockets, congestion, and rerouting.
+| Suite | Count |
+| --- | --- |
+| Backend test cases | 36 |
+| Frontend unit tests | 23 |
+| Playwright browser tests | Four existing tests and one opt-in real-stack browser test |
+| Docker smoke test | Covers HTTP, WebSockets, congestion, and rerouting |
 
-The frontend production build currently emits a non-blocking large-chunk warning for the 3D bundles.
+> [!NOTE]
+> The frontend production build currently emits a non-blocking large-chunk warning for the 3D bundles.
 
-## Docker
+## 🐳 Docker
 
 Start Docker Desktop (or Docker Engine), then run from the repository root:
 
@@ -435,9 +488,11 @@ docker compose up --build --wait
 
 Open **http://localhost:8080**. This serves the existing stadium UI, REST API, and WebSockets through one origin. The backend is private to the Compose network, not exposed on host port 8000.
 
-- API documentation: `http://localhost:8080/docs`
-- Frontend health: `http://localhost:8080/health`
-- Backend health through the proxy: `http://localhost:8080/api/health`
+| Check | URL |
+| --- | --- |
+| API documentation | `http://localhost:8080/docs` |
+| Frontend health | `http://localhost:8080/health` |
+| Backend health through the proxy | `http://localhost:8080/api/health` |
 
 Check the complete connection, including real 4,000-person telemetry and gate rerouting:
 
@@ -447,7 +502,10 @@ docker compose run --rm smoke
 
 The smoke test creates an isolated synthetic run. It does not train a model, run intervention rollouts, or reset another simulation.
 
-Both application containers run as non-root users with read-only runtime filesystems, limited writable paths, health checks, and rotated logs. The frontend waits for backend readiness. Datasets and models persist in the `backend-data` named volume. Active simulation sessions remain in memory and reset when the backend restarts, so keep exactly one backend process and replica.
+**Runtime and security.** Both application containers run as non-root users with read-only runtime filesystems, limited writable paths, health checks, and rotated logs. The frontend waits for backend readiness. Datasets and models persist in the `backend-data` named volume.
+
+> [!IMPORTANT]
+> Active simulation sessions remain in memory and reset when the backend restarts, so keep exactly one backend process and replica.
 
 For source hot reload, use the development override:
 
@@ -455,11 +513,12 @@ For source hot reload, use the development override:
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build --wait
 ```
 
-This also uses port 8080. Stop the normal stack first, or set `FRONTEND_PORT=8081` for a second stack. Development uses a separate Compose project and data volume.
+> [!TIP]
+> The development override also uses port 8080. Stop the normal stack first, or set `FRONTEND_PORT=8081` for a second stack. Development uses a separate Compose project and data volume.
 
 See [the Docker runbook](docs/DOCKER.md) for configuration, containerized tests, data/model management, troubleshooting, shutdown, and deployment limitations. The Docker setup does not change the stadium design.
 
-## Immediate Roadmap
+## 📌 Immediate roadmap
 
 Work should proceed in this order:
 
@@ -480,7 +539,7 @@ Detailed ownership and completion conditions are maintained in:
 - [PERSON_1_TO_PERSON_2_DATA_HANDOFF.md](PERSON_1_TO_PERSON_2_DATA_HANDOFF.md)
 - [PERSON_2_ALGORITHM_IMPLEMENTATION.md](PERSON_2_ALGORITHM_IMPLEMENTATION.md)
 
-## Safety and Privacy
+## 🔒 Safety and privacy
 
 - The prototype uses synthetic people and anonymous numerical IDs.
 - No facial recognition or personally identifiable information is required.
