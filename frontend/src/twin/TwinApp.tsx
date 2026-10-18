@@ -2,6 +2,7 @@ import { Check, ChevronDown, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { STAGE_LABEL } from "./domain/risk";
+import { CongestionClient } from "./congestion/CongestionClient";
 import type { CrowdTwinService } from "./services/CrowdTwinService";
 import { MockTwinService } from "./services/MockTwinService";
 import { useTwinStore } from "./state/twinStore";
@@ -156,12 +157,14 @@ function MobileLayout({ reducedMotion }: { reducedMotion: boolean }) {
 
 export default function TwinApp({ service }: { service?: CrowdTwinService }) {
   const connect = useTwinStore((s) => s.connect);
+  const connectCongestion = useTwinStore((s) => s.connectCongestion);
   const ready = useTwinStore((s) => Boolean(s.snapshot && s.venue));
   const tier = useViewportTier();
   const reducedMotion = useReducedMotion();
   const injected = useRef(service);
 
   useEffect(() => connect(injected.current ?? new MockTwinService()), [connect]);
+  useEffect(() => connectCongestion(new CongestionClient()), [connectCongestion]);
 
   if (!ready) {
     return <div className="cg-root grid min-h-screen place-items-center text-xs text-ti-dim">Initialising digital twin…</div>;

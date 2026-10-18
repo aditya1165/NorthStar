@@ -25,7 +25,15 @@ export type PlaybackStatus = "idle" | "running" | "paused" | "complete";
 
 export type ForecastHorizon = 0 | 5 | 10;
 
-export type GateId = "gate_a" | "gate_b" | "gate_c";
+export type GateId =
+  | "gate_a"
+  | "gate_b"
+  | "gate_c"
+  | "gate_d"
+  | "gate_e"
+  | "gate_f"
+  | "gate_g"
+  | "gate_h";
 
 export type ZoneId =
   | "north_concourse"
@@ -64,6 +72,8 @@ export interface GateLayout {
   id: GateId;
   label: string;
   angleDeg: number;
+  /** Maximum number of people that can cross the exit per simulated minute. */
+  capacityPerMinute: number;
   /** Where people go after passing this gate. */
   destination: Point2;
 }
@@ -91,7 +101,15 @@ export interface VenueLayout {
   name: string;
   /** Bowl ellipse radii. All ring geometry is expressed as a scale of these. */
   bowl: { rx: number; rz: number };
-  ring: { pitch: number; seatInner: number; seatOuter: number; concourseInner: number; concourseOuter: number };
+  ring: {
+    pitch: number;
+    seatInner: number;
+    seatOuter: number;
+    concourseInner: number;
+    concourseOuter: number;
+    /** Ground-level circulation path reached after descending a seating aisle. */
+    basePath: number;
+  };
   sections: readonly SeatingSection[];
   gates: readonly GateLayout[];
   zones: readonly ZoneLayout[];

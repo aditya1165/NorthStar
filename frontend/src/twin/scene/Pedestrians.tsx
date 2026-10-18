@@ -2,6 +2,7 @@ import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 
+import { TOTAL_POPULATION } from "../congestion/types";
 import type { VenueLayout } from "../domain/types";
 import { AGENT_COLOR, CrowdField } from "../sim/crowdField";
 import { useTwinStore } from "../state/twinStore";
@@ -12,6 +13,8 @@ const COLORS: Record<number, THREE.Color> = {
   [AGENT_COLOR.waiting]: new THREE.Color("#b3aea6"),
 };
 
+const TELEMETRY_INTERVAL_MS = 1_000;
+
 /**
  * All pedestrians in a single InstancedMesh. Positions come from CrowdField and
  * are written straight into the instance matrix buffer each frame.
@@ -21,6 +24,7 @@ export function Pedestrians({ venue, count }: { venue: VenueLayout; count: numbe
   const field = useMemo(() => new CrowdField(venue, count), [venue, count]);
   const prevColor = useMemo(() => new Uint8Array(count).fill(255), [count]);
   const sync = useRef({ epoch: -1, snapMinute: -1, snapAt: 0, rate: 0 });
+  const telemetry = useRef({ epoch: -1, sequence: 0, sentAt: -Infinity, minute: -1 });
 
   const geometry = useMemo(() => {
     const g = new THREE.CapsuleGeometry(0.075, 0.17, 2, 6);
@@ -43,8 +47,10 @@ export function Pedestrians({ venue, count }: { venue: VenueLayout; count: numbe
 
   useFrame(() => {
     const m = mesh.current;
-    const snapshot = useTwinStore.getState().snapshot;
-    const visible = useTwinStore.getState().layers.agents;
+    const store = useTwinStore.getState();
+    const snapshot = store.snapshot;
+    const congestion = store.congestion;
+    const visible = store.layers.agents;
     if (!m || !snapshot) return;
     m.visible = visible;
 
@@ -52,8 +58,8 @@ export function Pedestrians({ venue, count }: { venue: VenueLayout; count: numbe
     const now = performance.now();
     if (snapshot.epoch !== s.epoch || snapshot.minute < s.snapMinute - 1e-6) {
       // Reset / jump: rebuild deterministically and fast-forward to the snapshot time.
-      field.reset(-3);
-      field.advanceTo(snapshot.minute, snapshot);
+      field.reset(0);
+      field.advanceTo(snapshot.minute, snapshot, congestion);
       s.epoch = snapshot.epoch;
       s.snapMinute = snapshot.minute;
       s.snapAt = now;
@@ -72,7 +78,28 @@ export function Pedestrians({ venue, count }: { venue: VenueLayout; count: numbe
     const running = snapshot.status === "running";
     if (!running) s.rate = 0;
     const predicted = running ? Math.min(snapshot.minute + s.rate * (now - s.snapAt), snapshot.minute + 0.12) : snapshot.minute;
-    if (predicted > field.time) field.advanceTo(predicted, snapshot);
+    if (predicted > field.time) field.advanceTo(predicted, snapshot, congestion);
+
+    const stream = telemetry.current;
+    if (stream.epoch !== snapshot.epoch) {
+      stream.epoch = snapshot.epoch;
+      stream.sequence = 0;
+      stream.sentAt = -Infinity;
+      stream.minute = -1;
+    }
+    if (count === TOTAL_POPULATION && field.time !== stream.minute && now - stream.sentAt >= TELEMETRY_INTERVAL_MS) {
+      const sample = field.telemetry();
+      useTwinStore.getState().publishTelemetry({
+        runId: `${venue.id}:${snapshot.epoch}`,
+        sequence: stream.sequence,
+        simulationTimeSeconds: Math.max(0, field.time * 60),
+        population: TOTAL_POPULATION,
+        ...sample,
+      });
+      stream.sequence += 1;
+      stream.sentAt = now;
+      stream.minute = field.time;
+    }
 
     if (!visible) return;
     const arr = m.instanceMatrix.array as Float32Array;

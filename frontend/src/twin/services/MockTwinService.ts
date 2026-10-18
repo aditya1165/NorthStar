@@ -1,4 +1,4 @@
-import type { IncidentKind, InterventionId, TwinSnapshot, VenueLayout } from "../domain/types";
+import type { GateId, IncidentKind, InterventionId, TwinSnapshot, VenueLayout } from "../domain/types";
 import { MockScenarioEngine } from "../mock/engine";
 import { SCENARIO } from "../mock/scenario";
 import { MOCK_VENUE } from "../mock/venue";
@@ -61,6 +61,11 @@ export class MockTwinService implements CrowdTwinService {
 
   async setSpeed(speed: number) {
     this.engine.setSpeed(speed);
+    this.emit();
+  }
+
+  async setGateStatus(gateId: GateId, status: "open" | "closed") {
+    this.engine.setGateStatus(gateId, status);
     this.emit();
   }
 

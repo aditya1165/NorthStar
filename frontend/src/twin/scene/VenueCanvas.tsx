@@ -1,6 +1,7 @@
 import { Canvas } from "@react-three/fiber";
 import { useMemo } from "react";
 
+import { TOTAL_POPULATION } from "../congestion/types";
 import { useTwinStore } from "../state/twinStore";
 import type { ViewportTier } from "../ui/hooks";
 import { PALETTE } from "../ui/palette";
@@ -13,10 +14,10 @@ import { Routes } from "./Routes";
 import { Stadium } from "./Stadium";
 import { ZoneField } from "./ZoneField";
 
-const QUALITY: Record<ViewportTier, { agents: number; dpr: [number, number]; antialias: boolean; detail: "high" | "low" }> = {
-  desktop: { agents: 1800, dpr: [1, 1.75], antialias: true, detail: "high" },
-  tablet: { agents: 1100, dpr: [1, 1.5], antialias: true, detail: "high" },
-  mobile: { agents: 520, dpr: [1, 1.25], antialias: false, detail: "low" },
+const QUALITY: Record<ViewportTier, { dpr: [number, number]; antialias: boolean; detail: "high" | "low" }> = {
+  desktop: { dpr: [1, 1.75], antialias: true, detail: "high" },
+  tablet: { dpr: [1, 1.5], antialias: true, detail: "high" },
+  mobile: { dpr: [1, 1.25], antialias: false, detail: "low" },
 };
 
 export default function VenueCanvas({ tier, reducedMotion }: { tier: ViewportTier; reducedMotion: boolean }) {
@@ -47,7 +48,7 @@ export default function VenueCanvas({ tier, reducedMotion }: { tier: ViewportTie
       <ZoneField venue={venue} reducedMotion={reducedMotion} />
       <Routes venue={venue} reducedMotion={reducedMotion} />
       <Gates venue={venue} reducedMotion={reducedMotion} />
-      <Pedestrians venue={venue} count={quality.agents} />
+      <Pedestrians venue={venue} count={TOTAL_POPULATION} />
       <LabelProjector />
       <CameraRig mobile={mobile} reducedMotion={reducedMotion} />
     </Canvas>

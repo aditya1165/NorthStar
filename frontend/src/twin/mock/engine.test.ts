@@ -99,4 +99,14 @@ describe("MockScenarioEngine", () => {
     expect(engine.snapshot().recommendation?.status).toBe("rejected");
     expect(engine.snapshot().activePlan).toBeNull();
   });
+
+  it("allows the operator to open and close every exit", () => {
+    const engine = new MockScenarioEngine();
+    for (const gate of engine.snapshot().gates) {
+      engine.setGateStatus(gate.id, "closed");
+      expect(engine.snapshot().gates.find((item) => item.id === gate.id)?.status).toBe("closed");
+      engine.setGateStatus(gate.id, "open");
+      expect(engine.snapshot().gates.find((item) => item.id === gate.id)?.status).toBe("open");
+    }
+  });
 });

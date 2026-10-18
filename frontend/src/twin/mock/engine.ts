@@ -1,6 +1,7 @@
 import { DENSITY_THRESHOLDS, levelForDensity, riskRank, UNSAFE_DENSITY } from "../domain/risk";
 import type {
   ContributingFactor,
+  GateId,
   GateState,
   IncidentKind,
   InterventionId,
@@ -27,6 +28,7 @@ import {
   zoneDensities,
   type ModelEvents,
 } from "./scenario";
+import { MOCK_VENUE } from "./venue";
 
 const ZONE_IDS: ZoneId[] = [
   "southeast_concourse",
@@ -61,6 +63,8 @@ interface EngineState {
   interventions: InterventionOption[];
   /** Sub-step remainder so playback is frame-rate independent. */
   carry: number;
+  closedGates: Set<GateId>;
+  scriptedGateBHandled: boolean;
 }
 
 function initialState(epoch: number, speed: number): EngineState {
@@ -74,6 +78,8 @@ function initialState(epoch: number, speed: number): EngineState {
     recommendation: null,
     interventions: [],
     carry: 0,
+    closedGates: new Set(),
+    scriptedGateBHandled: false,
   };
 }
 
@@ -132,6 +138,15 @@ export class MockScenarioEngine {
     this.state.speed = speed;
   }
 
+  setGateStatus(gateId: GateId, status: "open" | "closed"): void {
+    if (status === "closed") this.state.closedGates.add(gateId);
+    else this.state.closedGates.delete(gateId);
+    if (gateId === "gate_b") {
+      this.state.scriptedGateBHandled = true;
+      this.state.events.gateBClosedAt = status === "closed" ? snap(this.state.minute) : null;
+    }
+  }
+
   /** Advance by a number of scenario minutes using fixed sub-steps. */
   advance(minutes: number): void {
     if (this.state.status !== "running") return;
@@ -153,7 +168,11 @@ export class MockScenarioEngine {
 
   triggerIncident(kind: IncidentKind): void {
     const at = snap(this.state.minute);
-    if (kind === "gate_b_closure" && this.state.events.gateBClosedAt === null) this.state.events.gateBClosedAt = at;
+    if (kind === "gate_b_closure" && this.state.events.gateBClosedAt === null) {
+      this.state.events.gateBClosedAt = at;
+      this.state.closedGates.add("gate_b");
+      this.state.scriptedGateBHandled = true;
+    }
     if (kind === "metro_delay" && this.state.events.metroDelayedAt === null) this.state.events.metroDelayedAt = at;
   }
 
@@ -181,7 +200,11 @@ export class MockScenarioEngine {
     s.minute = snap(s.minute + SCENARIO.step);
     const t = s.minute;
 
-    if (s.events.gateBClosedAt === null && t >= SCENARIO.scripted.gateBClosure) s.events.gateBClosedAt = SCENARIO.scripted.gateBClosure;
+    if (!s.scriptedGateBHandled && t >= SCENARIO.scripted.gateBClosure) {
+      s.events.gateBClosedAt = SCENARIO.scripted.gateBClosure;
+      s.closedGates.add("gate_b");
+      s.scriptedGateBHandled = true;
+    }
     if (s.events.metroDelayedAt === null && t >= SCENARIO.scripted.metroDelay) s.events.metroDelayedAt = SCENARIO.scripted.metroDelay;
 
     const events = this.modelEvents();
@@ -337,24 +360,16 @@ export class MockScenarioEngine {
       projection.push({ minute: round(t + dt), density: round(d), low: round(d - band(d, dt)), high: round(d + band(d, dt)) });
     }
 
-    const gateBClosed = s.events.gateBClosedAt !== null;
-    const gateCOpen = s.plan ? interventionDefinition(s.plan.id).opensGateC : false;
     const metroDelayed = s.events.metroDelayedAt !== null;
-    const gates: GateState[] = [
-      { id: "gate_a", status: "open", throughputPerMin: Math.round(210 * (s.plan?.id === "redirect_205_208" ? 1.25 : 1)), note: "Open · west exit" },
-      {
-        id: "gate_b",
-        status: gateBClosed ? "closed" : "open",
-        throughputPerMin: gateBClosed ? 0 : 240,
-        note: gateBClosed ? "Closed · turnstile fault" : "Open · metro exit",
-      },
-      {
-        id: "gate_c",
-        status: gateCOpen ? "open" : "closed",
-        throughputPerMin: gateCOpen ? 260 : 0,
-        note: gateCOpen ? "Open · relief exit" : "Closed · reserve",
-      },
-    ];
+    const gates: GateState[] = MOCK_VENUE.gates.map((gate) => {
+      const closed = s.closedGates.has(gate.id);
+      return {
+        id: gate.id,
+        status: closed ? "closed" : "open",
+        throughputPerMin: closed ? 0 : gate.capacityPerMinute,
+        note: closed ? "Closed · operator control" : "Open · available exit",
+      };
+    });
 
     return {
       epoch: s.epoch,
@@ -396,7 +411,7 @@ export class MockScenarioEngine {
     const metro = 2.4 * r(events.metroDelayedAt, 6) * relief;
     const hot = zoneDensities(t, events).southeast_concourse;
     const raw: ContributingFactor[] = [
-      { id: "gate_b", label: "Gate B closed — 240 people/min of exit capacity lost", weight: gate },
+      { id: "gate_b", label: "Gate B closed — 90 people/min of exit capacity lost", weight: gate },
       { id: "metro", label: "Metro delay — platform capacity at 45%", weight: metro },
       { id: "inflow", label: "Inflow exceeds outflow in Southeast Concourse", weight: Math.max(0, (gate + metro) * 0.55) },
       { id: "counterflow", label: "Counter-flow at Section 207 vomitory", weight: hot > 2.8 ? (hot - 2.8) * 0.7 : 0 },

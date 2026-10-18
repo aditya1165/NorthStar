@@ -1,4 +1,4 @@
-import type { IncidentKind, InterventionId, TwinSnapshot, VenueLayout } from "../domain/types";
+import type { GateId, IncidentKind, InterventionId, TwinSnapshot, VenueLayout } from "../domain/types";
 
 /**
  * Boundary between the visual layer and whatever produces twin data.
@@ -20,6 +20,7 @@ export interface CrowdTwinService {
   resume(): Promise<void>;
   reset(): Promise<void>;
   setSpeed(speed: number): Promise<void>;
+  setGateStatus(gateId: GateId, status: "open" | "closed"): Promise<void>;
   triggerIncident(kind: IncidentKind): Promise<void>;
   /** Move to the moment a recommendation is available. */
   jumpToIncident(): Promise<void>;

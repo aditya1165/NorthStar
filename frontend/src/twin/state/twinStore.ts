@@ -1,7 +1,14 @@
 import { create } from "zustand";
 
+import type { CongestionClient } from "../congestion/CongestionClient";
+import type {
+  CongestionConnectionStatus,
+  CongestionSnapshot,
+  CongestionTelemetryBatch,
+} from "../congestion/types";
 import type {
   ForecastHorizon,
+  GateId,
   IncidentKind,
   InterventionId,
   InterventionOption,
@@ -15,8 +22,11 @@ export type CameraPreset = "overview" | "top" | "incident";
 
 interface TwinState {
   service: CrowdTwinService | null;
+  congestionClient: CongestionClient | null;
   venue: VenueLayout | null;
   snapshot: TwinSnapshot | null;
+  congestion: CongestionSnapshot | null;
+  congestionConnection: CongestionConnectionStatus;
 
   horizon: ForecastHorizon;
   /** Operator's chosen candidate; null means "follow the recommendation". */
@@ -27,6 +37,8 @@ interface TwinState {
   dismissedStabilizedEpoch: number | null;
 
   connect: (service: CrowdTwinService) => () => void;
+  connectCongestion: (client: CongestionClient) => () => void;
+  publishTelemetry: (batch: CongestionTelemetryBatch) => void;
 
   start: () => void;
   pause: () => void;
@@ -34,6 +46,7 @@ interface TwinState {
   reset: () => void;
   replay: () => void;
   setSpeed: (speed: number) => void;
+  setGateStatus: (gateId: GateId, status: "open" | "closed") => void;
   triggerIncident: (kind: IncidentKind) => void;
   jumpToIncident: () => void;
 
@@ -60,8 +73,11 @@ export const useTwinStore = create<TwinState>((set, get) => {
 
   return {
     service: null,
+    congestionClient: null,
     venue: null,
     snapshot: null,
+    congestion: null,
+    congestionConnection: "connecting",
     horizon: 10,
     selectedInterventionId: null,
     modifying: false,
@@ -80,6 +96,7 @@ export const useTwinStore = create<TwinState>((set, get) => {
         if (snapshot.epoch !== lastEpoch) {
           lastEpoch = snapshot.epoch;
           clearDecisionUi();
+          set({ congestion: null });
         }
         set({ snapshot });
       });
@@ -89,6 +106,24 @@ export const useTwinStore = create<TwinState>((set, get) => {
         service.dispose();
         set({ service: null });
       };
+    },
+
+    connectCongestion: (client) => {
+      set({ congestionClient: client, congestionConnection: "connecting" });
+      client.connect({
+        onConnection: (congestionConnection) => set({ congestionConnection }),
+        onSnapshot: (congestion) => set({ congestion }),
+      });
+      return () => {
+        client.dispose();
+        set({ congestionClient: null, congestion: null, congestionConnection: "unavailable" });
+      };
+    },
+
+    publishTelemetry: (batch) => {
+      const state = get();
+      if (state.congestion && state.congestion.runId !== batch.runId) set({ congestion: null });
+      state.congestionClient?.publish(batch);
     },
 
     start: () => call((s) => s.start()),
@@ -106,6 +141,7 @@ export const useTwinStore = create<TwinState>((set, get) => {
       });
     },
     setSpeed: (speed) => call((s) => s.setSpeed(speed)),
+    setGateStatus: (gateId, status) => call((s) => s.setGateStatus(gateId, status)),
     triggerIncident: (kind) => call((s) => s.triggerIncident(kind)),
     jumpToIncident: () => {
       clearDecisionUi();

@@ -1,5 +1,28 @@
 # Person 2 — Risk Detection and Forecasting Implementation
 
+## Current Implementation Status
+
+Implemented now:
+
+- FastAPI WebSocket ingestion at `/ws/congestion`;
+- strict accounting for all 4,000 stable person identities;
+- shared detection geometry for Gate A through Gate H;
+- per-gate density, queue length, mean speed, and one-minute throughput;
+- five-simulated-second congestion persistence and ten-second clearing hysteresis;
+- live congestion results in the existing React stadium UI;
+- deterministic mass-balance forecasting baseline in `backend/app/forecasting`.
+
+Still TODO:
+
+1. Aggregate the per-person stream into rolling zone histories.
+2. Connect those live histories to the deterministic 5- and 10-minute baseline.
+3. Receive at least 100 reproducible simulation runs from Person 1.
+4. Construct future targets and scenario-level train/validation/test splits.
+5. Train gradient-boosted models only after the dataset passes validation.
+6. Compare every trained model against the deterministic baseline.
+
+The current routing proof is deterministic and does not require ML. Backend-owned routing belongs to the next integration milestone and should consume Person 2's gate metrics. See [`PROJECT_CONTEXT.md`](PROJECT_CONTEXT.md) for the complete project status.
+
 ## Decision
 
 The core forecasting system should use neither an LLM nor OpenCV.

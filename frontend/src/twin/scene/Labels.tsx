@@ -12,7 +12,7 @@ function GateLabel({ venue, gate, planned }: { venue: VenueLayout; gate: GateSta
   const layout = venue.gates.find((g) => g.id === gate.id)!;
   const [x, z] = ringPoint(venue.bowl.rx, venue.bowl.rz, layout.angleDeg, venue.ring.concourseOuter + 0.17);
   const closed = gate.status === "closed";
-  const incident = gate.id === "gate_b" && closed;
+  const incident = closed;
   const tone = incident ? "border-signal/70 text-signal-text" : closed ? "border-ti-edge text-ti-text" : "border-mineral/60 text-mineral-text";
   return (
     <ProjectedLabel id={`gate-${gate.id}`} position={[x, 2.1, z]}>

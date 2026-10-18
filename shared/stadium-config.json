@@ -1,0 +1,33 @@
+{
+  "version": "meridian-stadium-v2",
+  "population": 4000,
+  "metersPerSceneUnit": 6,
+  "bowl": {
+    "rx": 12,
+    "rz": 9
+  },
+  "ring": {
+    "pitch": 0.47,
+    "seatInner": 0.55,
+    "seatOuter": 0.98,
+    "concourseInner": 1.04,
+    "concourseOuter": 1.32,
+    "basePath": 0.52
+  },
+  "gateDefaults": {
+    "capacityPerMinute": 90,
+    "approachInnerScale": 1.05,
+    "approachOuterScale": 1.34,
+    "approachHalfAngleDeg": 4.5
+  },
+  "gates": [
+    { "id": "gate_a", "label": "Gate A", "angleDeg": -15 },
+    { "id": "gate_b", "label": "Gate B", "angleDeg": 30 },
+    { "id": "gate_c", "label": "Gate C", "angleDeg": 75 },
+    { "id": "gate_d", "label": "Gate D", "angleDeg": 120 },
+    { "id": "gate_e", "label": "Gate E", "angleDeg": 165 },
+    { "id": "gate_f", "label": "Gate F", "angleDeg": 210 },
+    { "id": "gate_g", "label": "Gate G", "angleDeg": 255 },
+    { "id": "gate_h", "label": "Gate H", "angleDeg": 300 }
+  ]
+}

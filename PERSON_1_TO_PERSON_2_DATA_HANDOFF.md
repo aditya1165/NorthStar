@@ -1,5 +1,16 @@
 # CrowdGuardian — Person 1 to Person 2 Data Handoff
 
+## Current Handoff Status
+
+The live integration now precedes the batch-training handoff described later in this document:
+
+- React sends all 4,000 logical identities to `ws://localhost:8000/ws/congestion` once per real second.
+- Python validates identity conservation and calculates eight-gate density, queue, speed, and throughput metrics.
+- Gate geometry is shared through `shared/stadium-config.json`.
+- The first batch-data deliverable is still pending.
+
+For the first dataset, keep attendance fixed at 4,000 and vary gate closures, section-release timing, walking speed, and random seed. Deliver at least 100 complete runs before expanding attendance or training a gradient-boosted model. [`PROJECT_CONTEXT.md`](PROJECT_CONTEXT.md) contains the active acceptance criteria.
+
 ## Purpose
 
 This document defines exactly what the Digital Twin and Telemetry owner (Person 1) must provide to the Risk Detection and Forecasting owner (Person 2).
@@ -111,7 +122,7 @@ attendance
   "metro_delayed": true,
   "active_intervention": null,
   "route_compliance": 0.78,
-  "attendance": 12500
+  "attendance": 4000
 }
 ```
 
@@ -200,10 +211,10 @@ Generate both normal and disrupted operations. The training dataset must not con
 Recommended scenario distribution:
 
 - 25% normal operations
-- 25% Gate B closure only
-- 20% metro delay only
-- 20% Gate B closure plus metro delay
-- 10% unusual combinations and boundary cases
+- 25% one selected gate closed
+- 20% two or more selected gates closed
+- 15% gate closure followed by reopening
+- 15% metro-delay and boundary combinations
 
 Vary at least these parameters:
 
@@ -225,7 +236,7 @@ random_seed
 Suggested ranges for the first dataset:
 
 ```python
-attendance = random.randint(5_000, 20_000)
+attendance = 4_000
 route_compliance = random.uniform(0.45, 0.95)
 mean_walking_speed_mps = random.uniform(1.0, 1.5)
 incident_start_minute = random.uniform(2.0, 12.0)
@@ -284,10 +295,10 @@ flow: people per minute
 Person 1 should generate separate scenarios for:
 
 - Do nothing
-- Open Gate C
-- Redirect sections 204–206
-- Make the east corridor one-way
-- Open Gate C and redirect sections
+- Load-aware reassignment to open gates
+- Meter selected seating-section releases
+- Make a selected corridor one-way
+- Combined reassignment and release control
 
 Use a common `scenario_family_id` when several runs share the same initial state but apply different interventions. This allows later comparison of outcomes under matched conditions.
 
@@ -322,7 +333,7 @@ Do not use one large JSON array for the full training dataset.
 ```json
 {
   "dataset_version": "0.1.0",
-  "simulator": "JuPedSim",
+  "simulator": "CrowdField TypeScript stadium engine",
   "simulator_version": "record-installed-version",
   "generated_at_utc": "ISO-8601 timestamp",
   "scenario_count": 500,

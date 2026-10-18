@@ -1,5 +1,21 @@
 # CrowdGuardian — Person 1 HTML Canvas Simulation Expectations
 
+## Current-Status Override
+
+This document began as the broader two-scenario design specification. The active MVP is now **stadium-only**, and [`PROJECT_CONTEXT.md`](PROJECT_CONTEXT.md) is the canonical statement of what is implemented and what is next.
+
+Current implementation differences that override older requirements below:
+
+- Rendering uses the existing React Three Fiber/Three.js WebGL canvas, not a new 2D Canvas redesign.
+- The simulation currently runs in the React application, not a Web Worker.
+- The venue contains 24 seating sections and eight evenly distributed exits, Gate A–H.
+- Exactly 4,000 people follow explicit row, aisle, base-path, corridor, FIFO queue, and exit phases.
+- Live per-person data is sent to FastAPI once per real second.
+- Python currently owns congestion detection; deterministic rerouting is temporarily executed in React and is the next component to move into Python.
+- Wildfire, vehicles, and physical fire spread are deferred until the stadium closed loop is complete.
+
+The remaining wildfire and higher-fidelity physics sections are retained as future-scope design material, not current TODO items.
+
 ## 1. Purpose
 
 This document is the implementation and data-delivery contract for Person 1, who owns the

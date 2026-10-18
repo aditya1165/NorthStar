@@ -5,7 +5,7 @@ import * as THREE from "three";
 import { DEG, ringPoint } from "../domain/geometry";
 import type { GateId, VenueLayout } from "../domain/types";
 import { previewIntervention, useTwinStore } from "../state/twinStore";
-import { PALETTE } from "../ui/palette";
+import { PALETTE, RISK_COLOR } from "../ui/palette";
 
 const GATE_WIDTH = 1.9;
 const DOOR_HEIGHT = 1.05;
@@ -18,7 +18,7 @@ function Gate({ venue, id, reducedMotion }: { venue: VenueLayout; id: GateId; re
   const pulse = useRef<THREE.Mesh>(null);
   const pulseMat = useRef<THREE.MeshBasicMaterial>(null);
   const planned = useRef<THREE.Mesh>(null);
-  const last = useRef<{ status: string | null; epoch: number; changedAt: number }>({ status: null, epoch: -1, changedAt: -10 });
+  const last = useRef<{ state: string | null; epoch: number; changedAt: number }>({ state: null, epoch: -1, changedAt: -10 });
   const tmp = useMemo(() => new THREE.Color(), []);
 
   const { position, rotation } = useMemo(() => {
@@ -34,13 +34,15 @@ function Gate({ venue, id, reducedMotion }: { venue: VenueLayout; id: GateId; re
   useFrame((state, delta) => {
     const store = useTwinStore.getState();
     const gate = store.snapshot?.gates.find((g) => g.id === id);
+    const congestion = store.congestion?.gates.find((item) => item.gateId === id);
     if (!gate || !door.current || !doorMat.current || !strip.current) return;
     const now = state.clock.elapsedTime;
     const epoch = store.snapshot?.epoch ?? 0;
-    if (last.current.status !== gate.status || last.current.epoch !== epoch) {
+    const visualState = `${gate.status}:${congestion?.congested ? congestion.level : "clear"}`;
+    if (last.current.state !== visualState || last.current.epoch !== epoch) {
       // Pulse only for live changes, not first sync, resets or jumps.
-      const live = last.current.status !== null && last.current.epoch === epoch;
-      last.current = { status: gate.status, epoch, changedAt: live ? now : -10 };
+      const live = last.current.state !== null && last.current.epoch === epoch;
+      last.current = { state: visualState, epoch, changedAt: live ? now : -10 };
     }
     const closed = gate.status === "closed";
     const target = closed ? 1 : 0.001;
@@ -49,11 +51,13 @@ function Gate({ venue, id, reducedMotion }: { venue: VenueLayout; id: GateId; re
     door.current.position.y = (DOOR_HEIGHT * door.current.scale.y) / 2;
     door.current.visible = door.current.scale.y > 0.01;
 
-    const incident = id === "gate_b" && closed;
-    doorMat.current.color.lerp(tmp.set(incident ? "#4a2a1c" : "#2e2e33"), k);
-    doorMat.current.emissive.lerp(tmp.set(incident ? PALETTE.orange : "#000000"), k);
-    doorMat.current.emissiveIntensity = incident ? 0.35 : 0;
-    strip.current.color.lerp(tmp.set(closed ? (incident ? PALETTE.orange : PALETTE.titanium) : PALETTE.green), k);
+    const incident = closed;
+    const detected = congestion?.congested ?? false;
+    const alertColor = detected ? RISK_COLOR[congestion?.level ?? "high"] : PALETTE.orange;
+    doorMat.current.color.lerp(tmp.set(incident || detected ? "#4a2a1c" : "#2e2e33"), k);
+    doorMat.current.emissive.lerp(tmp.set(incident || detected ? alertColor : "#000000"), k);
+    doorMat.current.emissiveIntensity = incident || detected ? 0.35 : 0;
+    strip.current.color.lerp(tmp.set(detected ? alertColor : closed ? (incident ? PALETTE.orange : PALETTE.titanium) : PALETTE.green), k);
 
     if (pulse.current && pulseMat.current) {
       const age = now - last.current.changedAt;
@@ -63,7 +67,7 @@ function Gate({ venue, id, reducedMotion }: { venue: VenueLayout; id: GateId; re
         const s = 1 + age * 2.2;
         pulse.current.scale.set(s, s, s);
         pulseMat.current.opacity = 0.55 * (1 - age / 2.4);
-        pulseMat.current.color.set(closed ? PALETTE.orange : PALETTE.green);
+        pulseMat.current.color.set(detected ? alertColor : closed ? PALETTE.orange : PALETTE.green);
       }
     }
 

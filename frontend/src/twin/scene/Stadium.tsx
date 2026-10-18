@@ -23,7 +23,18 @@ function buildSeating(venue: VenueLayout, filter: (sectionNumber: number) => boo
     for (const tier of TIERS) {
       const inner = seatInner + (seatOuter - seatInner) * tier.from;
       const outer = seatInner + (seatOuter - seatInner) * tier.to;
-      parts.push(extrudedGeometry(sectorShape(rx, rz, section.angleDeg - 6.9, section.angleDeg + 6.9, inner, outer, 6), tier.height));
+      // Split every block around its centre aisle. Agents first move to this
+      // visible gap and then descend it instead of cutting across the stands.
+      parts.push(
+        extrudedGeometry(
+          sectorShape(rx, rz, section.angleDeg - 6.9, section.angleDeg - 0.9, inner, outer, 4),
+          tier.height,
+        ),
+        extrudedGeometry(
+          sectorShape(rx, rz, section.angleDeg + 0.9, section.angleDeg + 6.9, inner, outer, 4),
+          tier.height,
+        ),
+      );
     }
   }
   const merged = mergeGeometries(parts, false);
@@ -76,6 +87,7 @@ export function Stadium({ venue, highlightSections, detail }: { venue: VenueLayo
     () => ({
       concourseOuter: ellipsePoints(rx, rz, ring.concourseOuter, 0.012),
       concourseInner: ellipsePoints(rx, rz, ring.concourseInner, 0.012),
+      basePath: ellipsePoints(rx, rz, ring.basePath, 0.018),
       canopy: ellipsePoints(rx, rz, ring.seatOuter + 0.012, 3.1),
       canopyInner: ellipsePoints(rx, rz, ring.seatOuter - 0.16, 2.95),
       pitchLine: ellipsePoints(rx, rz, ring.pitch - 0.035, 0.03),
@@ -85,12 +97,23 @@ export function Stadium({ venue, highlightSections, detail }: { venue: VenueLayo
       ] as [number, number, number][],
       centre: ellipsePoints(1.1, 1.1, 1, 0.03, 40),
       exits: venue.gates.map((g) => {
-        const [x, z] = ringPoint(rx, rz, g.angleDeg, ring.concourseOuter);
+        const [x, z] = ringPoint(rx, rz, g.angleDeg, ring.basePath);
         return [
           [x, 0.012, z],
           [g.destination[0], 0.012, g.destination[1]],
         ] as [number, number, number][];
       }),
+      aisles: venue.sections.map((section) =>
+        Array.from({ length: 10 }, (_, index) => {
+          const scale = ring.basePath + ((ring.seatOuter - ring.basePath) * index) / 9;
+          const [x, z] = ringPoint(rx, rz, section.angleDeg, scale);
+          const y =
+            scale <= ring.seatInner
+              ? 0.025
+              : 0.08 + ((scale - ring.seatInner) / (ring.seatOuter - ring.seatInner)) * 1.37;
+          return [x, y, z] as [number, number, number];
+        }),
+      ),
     }),
     [venue, rx, rz, ring],
   );
@@ -142,6 +165,7 @@ export function Stadium({ venue, highlightSections, detail }: { venue: VenueLayo
       </mesh>
       <Line points={lines.concourseOuter} color={PALETTE.titanium} lineWidth={1} />
       <Line points={lines.concourseInner} color={PALETTE.titanium} lineWidth={1} transparent opacity={0.6} />
+      <Line points={lines.basePath} color={PALETTE.titaniumLight} lineWidth={1} transparent opacity={0.45} />
       <mesh geometry={geometries.wall}>
         <meshStandardMaterial color="#2c2c31" roughness={0.6} metalness={0.4} />
       </mesh>
@@ -157,7 +181,10 @@ export function Stadium({ venue, highlightSections, detail }: { venue: VenueLayo
       )}
 
       {lines.exits.map((pts, i) => (
-        <Line key={i} points={pts} color={PALETTE.titanium} lineWidth={1} dashed dashSize={0.4} gapSize={0.3} />
+        <Line key={i} points={pts} color={PALETTE.titaniumLight} lineWidth={1.2} transparent opacity={0.5} />
+      ))}
+      {lines.aisles.map((pts, i) => (
+        <Line key={`aisle-${i}`} points={pts} color={PALETTE.titaniumLight} lineWidth={1.4} transparent opacity={0.7} />
       ))}
 
       {/* Metro station */}

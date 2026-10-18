@@ -2,7 +2,10 @@ import asyncio
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import ValidationError
 
+from app.congestion import CongestionDetector, TelemetryBatch
+from app.congestion.models import ProtocolError
 from app.forecasting import ForecastService
 from app.response import ResponseService
 from app.shared.models import ApprovalResponse, IncidentRequest, SimulationSnapshot
@@ -90,6 +93,28 @@ async def telemetry_socket(websocket: WebSocket) -> None:
         while True:
             await websocket.send_json(simulation.snapshot().model_dump(mode="json"))
             await asyncio.sleep(1)
+    except WebSocketDisconnect:
+        return
+
+
+@app.websocket("/ws/congestion")
+async def congestion_socket(websocket: WebSocket) -> None:
+    """Receive per-person frontend telemetry and return backend-owned gate detection."""
+    await websocket.accept()
+    detector = CongestionDetector()
+    await websocket.send_json(detector.ready().model_dump(mode="json"))
+    try:
+        while True:
+            payload = await websocket.receive_json()
+            try:
+                batch = TelemetryBatch.model_validate(payload)
+                result = detector.process(batch)
+            except (ValidationError, ValueError) as error:
+                await websocket.send_json(
+                    ProtocolError(detail=str(error)).model_dump(mode="json")
+                )
+                continue
+            await websocket.send_json(result.model_dump(mode="json"))
     except WebSocketDisconnect:
         return
 

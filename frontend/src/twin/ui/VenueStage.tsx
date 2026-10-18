@@ -2,6 +2,7 @@ import { CircleCheck, X } from "lucide-react";
 import { Component, lazy, Suspense, type ReactNode } from "react";
 
 import { cn } from "../../lib/cn";
+import { mostSevereCongestion } from "../congestion/types";
 import { formatClock, RISK_LABEL } from "../domain/risk";
 import type { RiskLevel } from "../domain/types";
 import { useTwinStore } from "../state/twinStore";
@@ -37,9 +38,32 @@ export function IncidentStrip() {
   const unsafe = useTwinStore((s) => s.snapshot?.risk.minutesToUnsafe ?? null);
   const level = useTwinStore((s) => s.snapshot?.risk.level ?? "normal");
   const recommendationStatus = useTwinStore((s) => s.snapshot?.recommendation?.status);
+  const congestion = useTwinStore((s) => mostSevereCongestion(s.congestion));
+  const congestionConnection = useTwinStore((s) => s.congestionConnection);
 
   let tone: "critical" | "warning" | "info" | "safe" | null = null;
   let text = "";
+  if (congestion) {
+    tone = congestion.level === "critical" ? "critical" : "warning";
+    text = `Congestion detected · ${congestion.label} · ${congestion.densityPerM2.toFixed(1)} p/m² · queue ${congestion.queueLength}`;
+  } else if (congestionConnection === "unavailable") {
+    tone = "warning";
+    text = "Congestion monitoring unavailable · waiting for Python backend";
+  }
+  if (tone) {
+    return (
+      <div
+        className={cn(
+          "pointer-events-none flex items-center gap-2 rounded-md border px-3 py-1.5 text-xs font-medium backdrop-blur-md",
+          tone === "critical" && "border-vermilion/70 bg-[#2a1210]/85 text-vermilion-text",
+          tone === "warning" && "border-signal/40 bg-void/80 text-signal-text",
+        )}
+      >
+        <span aria-hidden>{tone === "critical" ? "▲" : "◆"}</span>
+        {text}
+      </div>
+    );
+  }
   switch (stage) {
     case "gate_closure":
       tone = "warning";

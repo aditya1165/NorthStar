@@ -62,6 +62,7 @@ export function ScenarioClock() {
 }
 
 export function Header({ compact, compactControls = false }: { compact: boolean; compactControls?: boolean }) {
+  const congestionConnection = useTwinStore((state) => state.congestionConnection);
   return (
     <header className="flex items-center gap-4 border-b border-ti-line bg-void/80 px-4 py-2.5 backdrop-blur-md md:px-5">
       <div className="flex shrink-0 items-center gap-2.5">
@@ -75,6 +76,16 @@ export function Header({ compact, compactControls = false }: { compact: boolean;
       <div className="ml-auto flex items-center gap-4">
         <span className="hidden whitespace-nowrap rounded-[3px] border border-violet/40 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em] text-violet-soft sm:inline">
           Mock scenario
+        </span>
+        <span
+          className={cn(
+            "hidden whitespace-nowrap rounded-[3px] border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em] sm:inline",
+            congestionConnection === "connected" && "border-mineral/40 text-mineral-text",
+            congestionConnection === "connecting" && "border-ti-edge text-ti-text",
+            congestionConnection === "unavailable" && "border-signal/40 text-signal-text",
+          )}
+        >
+          Detector {congestionConnection === "connected" ? "live" : congestionConnection}
         </span>
         <ScenarioClock />
         {!compact && <PlaybackControls compact={compactControls} className="hidden flex-nowrap md:flex" />}

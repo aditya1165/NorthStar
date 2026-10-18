@@ -16,17 +16,61 @@ Incident
 
 Each person owns one module and initially develops against shared mock JSON data. This keeps all four workstreams moving in parallel.
 
+## Current Delivery Status
+
+The project has moved beyond the original mocked-module starting point:
+
+- Person 1's browser simulation now contains 4,000 stable people, 24 seating sections, eight gates, explicit aisle/base-path movement, and FIFO gate queues.
+- Person 2's Python module receives live per-person WebSocket telemetry and detects persistent congestion at all eight exits.
+- A deterministic rerouting proof currently runs in the frontend after a closure or backend-confirmed congestion event.
+- Person 4's existing 3D operator interface is connected to the detector and exposes individual open/close control for every gate.
+- Forecast charts, intervention outcomes, and recommendation ranking remain demonstration data.
+- No gradient-boosted model will be trained until Person 1 produces the multi-run dataset.
+
+The stadium scenario is the only active MVP scenario. Wildfire work is deferred. See [`PROJECT_CONTEXT.md`](PROJECT_CONTEXT.md) for the canonical architecture and backlog.
+
+## Current Sprint TODO
+
+### Person 1 — Simulation data and controlled runs
+
+- Export reproducible normal, single-closure, multi-closure, and reopen runs.
+- Produce 30-second zone aggregates and scenario metadata.
+- Deliver at least 100 complete runs to Person 2.
+- Add measured exit time, queue, throughput, reroute, and walking-distance summaries.
+
+### Person 2 — Live risk and forecasting
+
+- Keep the current gate detector stable and configurable.
+- Convert per-person snapshots into rolling zone histories.
+- Connect the deterministic 5- and 10-minute baseline to those histories.
+- Define the training table and future targets after receiving Person 1's runs.
+- Do not train gradient boosting before the dataset and leakage-safe split exist.
+
+### Person 3 — Backend routing and intervention engine
+
+- Move the deterministic routing cost calculation from React into Python.
+- Return only changed person-to-gate assignments with reason and estimated benefit.
+- Add route-switch hysteresis, cooldown, and closed-gate constraints.
+- Add controlled do-nothing and rerouting comparisons before building broader intervention rollouts.
+
+### Person 4 — Frontend integration
+
+- Make the movement engine execute backend assignment deltas.
+- Display rerouted-person counts and the source/reason for the active routing decision.
+- Replace mock forecast and intervention surfaces only when their live endpoints are ready.
+- Preserve the current stadium design and backend-unavailable behavior.
+
 ## Shared Setup — Complete Together First
 
 Before splitting into individual tasks:
 
-1. Define 6–12 venue zones and their connections.
+1. Use the shared eight-gate venue configuration in `shared/stadium-config.json`.
 2. Confirm the demo incident: Gate B closes while a metro delay reduces downstream capacity.
-3. Confirm the candidate responses:
+3. Confirm the future candidate responses:
    - Do nothing
-   - Open Gate C
-   - Redirect selected seating sections
-   - Open Gate C and redirect selected sections
+   - Reassign selected sections or people to open gates
+   - Meter selected seating-section releases
+   - Apply a combined reassignment and release plan
 4. Agree on the telemetry, forecast, intervention, and simulation-state interfaces.
 5. Select a deterministic random seed for the final demonstration.
 6. Create four Git branches:
@@ -77,7 +121,7 @@ Build the pedestrian simulation and produce the live data consumed by the other 
 
 ### Tasks
 
-- Create a simplified stadium with seating sections, concourses, Gates A–C, and a metro entrance.
+- Maintain the simplified stadium with 24 seating sections, concourses, Gates A–H, and a metro entrance.
 - Simulate spectators moving from seating sections to exits.
 - Divide the venue into operational zones.
 - Implement deterministic random seeds.
@@ -113,7 +157,7 @@ simulation.apply_intervention(intervention)
 
 ### Definition of Done
 
-The simulation runs from initial release to venue clearance, produces valid telemetry, and creates visible congestion after Gate B closes.
+The simulation runs from initial release to venue clearance, preserves all 4,000 identities, responds to arbitrary gate closures, and exports reproducible telemetry and run summaries.
 
 ---
 
@@ -162,7 +206,7 @@ forecast = forecaster.predict(
 
 ### Definition of Done
 
-The module detects the scripted incident and forecasts the north-concourse bottleneck before maximum congestion occurs.
+The module detects persistent congestion at any of the eight exits and produces calculated 5- and 10-minute forecasts from live or recorded simulation histories.
 
 ---
 
@@ -176,10 +220,10 @@ Generate feasible operational responses, simulate their outcomes, and select the
 
 - Define the available interventions:
   - Do nothing
-  - Open Gate C
-  - Redirect selected sections
-  - Make a corridor one-way
-  - Apply a combined action
+  - Reassign affected people to lower-cost open gates
+  - Meter selected seating-section releases
+  - Make a selected corridor one-way
+  - Apply a combined reassignment and release action
 - Validate route, capacity, operational, and accessibility constraints.
 - Reject actions that:
   - Use closed or unsafe routes
@@ -244,7 +288,7 @@ Build a responsive React operator interface, connect it to the backend, and own 
 - Display crowd movement, zone density, queues, gate status, incident markers, and predicted congestion.
 - Compare interventions using calculated outcome metrics.
 - Add controls to start, pause, reset, and replay the scenario.
-- Add controls to close Gate B and trigger the metro delay.
+- Maintain controls to open or close every gate and trigger the metro delay.
 - Let the operator approve, modify, or reject a recommendation.
 - Apply approved actions to the live simulation.
 - Begin with typed mock JSON fixtures and Mock Service Worker so frontend work does not depend on unfinished backend modules.

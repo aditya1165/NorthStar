@@ -1,6 +1,7 @@
 import { DoorClosed, DoorOpen, TrainFront } from "lucide-react";
 
 import { cn } from "../../lib/cn";
+import { mostSevereCongestion } from "../congestion/types";
 import { formatClock, RISK_LABEL } from "../domain/risk";
 import type { ZoneId } from "../domain/types";
 import { useTwinStore } from "../state/twinStore";
@@ -26,27 +27,32 @@ function Metric({ label, value, unit, detail, tone }: { label: string; value: st
 
 export function RiskSummaryBlock() {
   const risk = useTwinStore((s) => s.snapshot?.risk);
+  const detected = useTwinStore((s) => mostSevereCongestion(s.congestion));
   const horizon = useTwinStore((s) => s.horizon);
   const zoneName = useZoneName();
   if (!risk) return null;
   const h = horizon === 0 ? 10 : horizon;
   const peak = risk.predictedPeak[h];
   const unsafe = risk.minutesToUnsafe;
+  const currentLevel = detected?.level ?? risk.level;
+  const currentDensity = detected?.densityPerM2 ?? risk.hotspotDensity;
+  const currentLocation = detected?.label ?? zoneName(risk.hotspotZoneId);
 
   return (
     <section aria-labelledby="risk-current" className="space-y-3">
       <div className="rounded-md border border-ti-line bg-void/40 px-3 py-3">
         <div className="flex items-baseline justify-between">
-          <span id="risk-current" className="cg-label">Current risk</span>
-          <span className="text-[11px] text-ti-text">{zoneName(risk.hotspotZoneId)}</span>
+          <span id="risk-current" className="cg-label">{detected ? "Backend detection" : "Current risk"}</span>
+          <span className="text-[11px] text-ti-text">{currentLocation}</span>
         </div>
         <div className="mt-2 flex items-end justify-between gap-3">
-          <RiskTag level={risk.level} className="text-2xl tracking-tight" />
+          <RiskTag level={currentLevel} className="text-2xl tracking-tight" />
           <span className="cg-num text-sm text-ti-text">
-            {risk.hotspotDensity.toFixed(1)} <span className="text-[11px] text-ti-dim">p/m²</span>
+            {currentDensity.toFixed(1)} <span className="text-[11px] text-ti-dim">p/m²</span>
           </span>
         </div>
-        <LevelMeter level={risk.level} className="mt-3" />
+        <LevelMeter level={currentLevel} className="mt-3" />
+        {detected && <p className="mt-2 text-[11px] text-ti-text">Queue {detected.queueLength} · mean speed {detected.meanSpeedMps.toFixed(1)} m/s</p>}
       </div>
       <dl className="grid grid-cols-1 gap-2 sm:grid-cols-3 xl:grid-cols-1 2xl:grid-cols-3">
         <Metric
@@ -99,20 +105,34 @@ export function GateStatusBlock() {
   const gates = useTwinStore((s) => s.snapshot?.gates ?? []);
   const transit = useTwinStore((s) => s.snapshot?.transit);
   const venue = useTwinStore((s) => s.venue);
+  const congestion = useTwinStore((s) => s.congestion);
+  const connection = useTwinStore((s) => s.congestionConnection);
+  const setGateStatus = useTwinStore((s) => s.setGateStatus);
   return (
     <section className="space-y-2">
       <SectionTitle>Gates &amp; transit</SectionTitle>
       <ul className="divide-y divide-ti-line rounded-md border border-ti-line">
         {gates.map((g) => {
           const closed = g.status === "closed";
-          const incident = closed && g.id === "gate_b";
+          const detected = congestion?.gates.find((item) => item.gateId === g.id);
+          const incident = closed || Boolean(detected?.congested);
           const Icon = closed ? DoorClosed : DoorOpen;
           return (
             <li key={g.id} className="flex items-center gap-2.5 px-3 py-2 text-xs">
               <Icon size={14} aria-hidden className={incident ? "text-signal-text" : closed ? "text-ti-dim" : "text-mineral-text"} />
               <span className="w-14 font-medium text-warm">{venue?.gates.find((v) => v.id === g.id)?.label}</span>
-              <span className={cn("flex-1", incident ? "text-signal-text" : "text-ti-text")}>{g.note}</span>
-              <span className="cg-num text-ti-dim">{g.throughputPerMin}/min</span>
+              <span className={cn("flex-1", incident ? "text-signal-text" : "text-ti-text")}>
+                {detected?.congested ? `${g.note} · queue ${detected.queueLength}` : g.note}
+              </span>
+              <span className="cg-num text-ti-dim">{detected ? `${detected.densityPerM2.toFixed(1)} p/m²` : `${g.throughputPerMin}/min`}</span>
+              <button
+                type="button"
+                className="cg-btn h-7 min-w-14 px-2 text-[10px]"
+                onClick={() => setGateStatus(g.id, closed ? "open" : "closed")}
+                aria-label={`${closed ? "Open" : "Close"} ${venue?.gates.find((v) => v.id === g.id)?.label}`}
+              >
+                {closed ? "Open" : "Close"}
+              </button>
             </li>
           );
         })}
@@ -127,6 +147,9 @@ export function GateStatusBlock() {
           </li>
         )}
       </ul>
+      <p className="text-[10px] uppercase tracking-[0.12em] text-ti-dim">
+        Python detector · {connection === "connected" ? "live" : connection}
+      </p>
     </section>
   );
 }

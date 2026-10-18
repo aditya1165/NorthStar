@@ -1,12 +1,13 @@
 import { ringArc, ringPoint } from "../domain/geometry";
-import type { Point2, SeatingSection, VenueLayout } from "../domain/types";
+import type { GateId, Point2, SeatingSection, VenueLayout } from "../domain/types";
+import stadiumConfig from "../../../../shared/stadium-config.json";
 
 /**
- * Mock venue: a simplified 24-section stadium bowl with an outer concourse ring,
- * three gates and a metro station to the southeast. Angles: 0° east, 90° south.
+ * Stadium geometry is sourced from the same checked-in configuration that the
+ * Python detector loads. Angles: 0° east, 90° south.
  */
-const RX = 12;
-const RZ = 9;
+const RX = stadiumConfig.bowl.rx;
+const RZ = stadiumConfig.bowl.rz;
 const LANE = 1.2;
 
 const sections: SeatingSection[] = Array.from({ length: 24 }, (_, k) => ({
@@ -21,13 +22,15 @@ export const MOCK_VENUE: VenueLayout = {
   id: "meridian-stadium",
   name: "Meridian Stadium",
   bowl: { rx: RX, rz: RZ },
-  ring: { pitch: 0.47, seatInner: 0.55, seatOuter: 0.98, concourseInner: 1.04, concourseOuter: 1.32 },
+  ring: stadiumConfig.ring,
   sections,
-  gates: [
-    { id: "gate_a", label: "Gate A", angleDeg: 190, destination: p(190, 1.95) },
-    { id: "gate_b", label: "Gate B", angleDeg: 50, destination: p(57, 1.86) },
-    { id: "gate_c", label: "Gate C", angleDeg: -15, destination: p(-15, 1.9) },
-  ],
+  gates: stadiumConfig.gates.map((gate) => ({
+    id: gate.id as GateId,
+    label: gate.label,
+    angleDeg: gate.angleDeg,
+    capacityPerMinute: stadiumConfig.gateDefaults.capacityPerMinute,
+    destination: p(gate.angleDeg, 1.62),
+  })),
   zones: [
     { id: "north_concourse", label: "North Concourse", shape: { kind: "ring", fromDeg: -130, toDeg: -50 }, areaM2: 1450 },
     { id: "east_concourse", label: "East Concourse", shape: { kind: "ring", fromDeg: -50, toDeg: 20, labelDeg: -38 }, areaM2: 1180 },
