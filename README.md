@@ -1,91 +1,471 @@
 # CrowdGuardian
 
-CrowdGuardian is a human-in-the-loop crowd-crisis decision-support prototype. Its current stadium twin streams the state of 4,000 simulated people to Python, detects persistent congestion across eight gates, and deterministically reroutes affected people. Live 5–10 minute forecasting and calculated intervention ranking are the next backend milestones.
+CrowdGuardian is a human-in-the-loop stadium crowd-management prototype. The current application simulates exactly 4,000 people leaving a fictional stadium through eight controllable exits, streams every person's state to Python, detects persistent gate congestion, and reroutes affected people using an explainable deterministic cost function.
 
-## Repository
+The project is intentionally a decision-support demonstrator. It is not certified evacuation software and must not be presented as guaranteed public-safety guidance.
 
-- `backend/` — FastAPI service, deterministic simulation, forecasting, and response ranking
-- `frontend/` — React, TypeScript, Vite, Tailwind CSS, TanStack Query, Zustand, Zod, and Recharts
-- `shared/stadium-config.json` — single source for the eight gate positions, capacities, and detector geometry
-- `data/` — scenario definitions, generated telemetry, and model artifacts
-- `PROJECT_CONTEXT.md` — canonical implementation status, architecture, and ordered TODO
-- `PROJECT_BRIEF.md` — product and technical definition
-- `TEAM_TASK_DISTRIBUTION.md` — four-person ownership and integration plan
+## Current Status
 
-## Quick start
+The repository is a hybrid prototype: the movement and congestion path is integrated, while forecasting and intervention planning are only partially connected.
 
-### Backend
+### Implemented and connected
+
+- Existing 3D React stadium design rendered with React Three Fiber and Three.js.
+- Exactly 4,000 stable logical person identities per simulation run.
+- Twenty-four seating sections and eight exits, Gate A through Gate H.
+- Explicit movement through the seat row, section aisle, lower base path, gate corridor, FIFO queue, and exterior exit path.
+- Capacity-limited queues at every gate.
+- Individual operator control to open or close any gate.
+- Permanent removal after a person exits; an exited ID cannot reappear during the run.
+- Complete per-person telemetry sent from React to FastAPI once per real second.
+- Backend validation of population accounting, unique IDs, run IDs, and increasing sequence numbers.
+- Python-owned gate density, queue, speed, throughput, persistence, and clearing calculations.
+- Live congestion presentation in the existing incident strip, risk summary, gate list, header, and 3D gate treatment.
+- Automatic WebSocket reconnect and an explicit detector-unavailable state.
+- Deterministic rerouting away from closed or backend-confirmed congested gates.
+- Shared stadium geometry consumed by both TypeScript and Python.
+- Unit, API, browser, build, lint, and Docker Compose checks.
+
+### Real algorithms that are not connected to the 3D stream yet
+
+- The backend contains an explainable mass-balance forecast baseline in `backend/app/forecasting/baseline.py`.
+- The backend exposes REST endpoints for a separate synthetic zone-level simulation.
+- Those REST forecasts operate on the synthetic backend snapshot, not on the default 3D application's per-person telemetry.
+
+### Still mocked or formula-driven
+
+The default 3D page uses `MockTwinService` and `MockScenarioEngine` for:
+
+- scenario clock and scripted stage progression;
+- Gate B and metro-delay narrative timing;
+- zone density curves shown outside the live gate detector result;
+- 5- and 10-minute forecast curves and confidence values;
+- contributing-factor percentages;
+- intervention candidates and predicted outcomes;
+- recommendation timing, ranking, approval narrative, and stabilization stage.
+
+The Python `ResponseService` is also a deterministic formula-based placeholder. It returns predefined candidate shapes with calculated multipliers; it does not clone the 4,000-person simulation or run real counterfactual rollouts.
+
+### Pending
+
+- Move the person-to-gate routing decision from React into Python.
+- Aggregate the live person stream into rolling zone histories.
+- Generate the first reproducible multi-run stadium dataset.
+- Connect the deterministic 5- and 10-minute forecast baseline to the live 3D run.
+- Train gradient-boosted forecasting models only after the dataset exists.
+- Replace formula-based intervention outcomes with actual simulation rollouts.
+- Return backend routing assignments and intervention decisions to the frontend.
+- Add measured before/after evaluation for queue, density, clearance time, walking distance, and rerouting.
+- Calibrate capacities and thresholds against documented assumptions.
+- Defer the wildfire scenario until the stadium loop is complete.
+
+See [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md) for the canonical architecture, ordered TODO, ownership, and acceptance criteria.
+
+## System Architecture
+
+The default application at `/` follows this path:
+
+```text
+MockTwinService
+  scenario clock, scripted incidents, mock forecasts and recommendations
+        |
+        v
+CrowdField in React
+  4,000 real logical agents, aisle movement, FIFO queues and exit lifecycle
+        |
+        | complete person snapshot every real second
+        v
+ws://localhost:8000/ws/congestion
+        |
+        v
+FastAPI CongestionDetector
+  validation, approach geometry, density, queue, speed, throughput, hysteresis
+        |
+        | eight gate results
+        v
+Existing React operator UI
+  live detector state, alerts, gate metrics and 3D gate highlighting
+        |
+        v
+CrowdField
+  currently applies deterministic rerouting in the browser
+```
+
+The intended next architecture moves the final decision boundary:
+
+```text
+React movement telemetry
+    -> Python detection
+    -> Python route-cost evaluation
+    -> changed person-to-gate assignments
+    -> React executes and visualizes assignments
+```
+
+No ML model is required for gate reassignment. The routing cost can remain deterministic and explainable. ML is reserved for future congestion forecasting after a suitable simulation dataset exists.
+
+## Stadium and Person Model
+
+The shared configuration is [shared/stadium-config.json](shared/stadium-config.json). It defines:
+
+- population and coordinate scale;
+- stadium bowl and circulation-ring geometry;
+- Gate A–H identifiers, labels, and angles;
+- default gate capacity;
+- gate-approach geometry used by the Python detector.
+
+The current prototype capacity is 90 people per simulated minute at each open gate. This is configurable demonstration data, not a measured stadium capacity.
+
+Each person moves through these states:
+
+```text
+waiting in seat
+    -> moving along row
+    -> descending section aisle
+    -> moving around lower base path
+    -> moving through selected gate corridor
+    -> waiting in FIFO gate queue
+    -> crossing exit
+    -> exited and removed
+```
+
+Movement is a deterministic waypoint model. It does not currently implement physical person-to-person collision forces. This keeps the first milestone reproducible and makes queue and route behavior easier to test.
+
+## Congestion Detection
+
+The backend constructs all eight approach polygons from the shared stadium configuration. For every telemetry batch it calculates:
+
+- number of people inside the gate approach;
+- approach density in people per square metre;
+- queue length for people assigned to that gate and below the queue-speed threshold;
+- mean walking speed;
+- exits recorded during the trailing simulated minute;
+- raw risk level;
+- persistent congestion and clearing state.
+
+Current prototype defaults include:
+
+- elevated density: 2.2 people/m²;
+- high density: 3.2 people/m²;
+- critical density: 4.5 people/m²;
+- elevated queue: 40 people;
+- high queue: 80 people;
+- critical queue: 160 people;
+- queue-speed threshold: 0.6 m/s;
+- critical-speed threshold: 0.35 m/s;
+- congestion persistence: 5 simulated seconds;
+- clear persistence: 10 simulated seconds.
+
+These thresholds are engineering defaults for the prototype. They are not certified crowd-safety limits.
+
+## Current Rerouting Logic
+
+A person becomes eligible for reassignment when the assigned gate is closed or Python confirms persistent congestion at that gate.
+
+Closed gates are excluded. Remaining gates are scored using:
+
+```text
+walking-distance cost
+  + queue-length penalty
+  + approach-density penalty
+  + confirmed-congestion penalty
+  + deterministic tie breaker
+```
+
+A switching margin and cooldown reduce oscillation. The next milestone will move this scoring into Python and return only changed assignments to React.
+
+## Telemetry Contract
+
+The frontend sends `message_type: "telemetry"` over `/ws/congestion` once per real second.
+
+Every batch contains:
+
+- `run_id` — stable for one simulation epoch;
+- `sequence` — strictly increasing within the run;
+- `simulation_time_seconds` — simulated, not wall-clock, time;
+- `population` — must equal 4,000;
+- `agents` — every currently active identity;
+- `exited_agents` — every identity already removed from the run.
+
+An active person contains:
+
+```json
+{
+  "person_id": 1842,
+  "x": 12.4,
+  "z": 5.4,
+  "speed_mps": 0.3,
+  "target_gate": "gate_b",
+  "movement_state": "queued"
+}
+```
+
+An exited person contains:
+
+```json
+{
+  "person_id": 1842,
+  "target_gate": "gate_b",
+  "exited_at_seconds": 327.4
+}
+```
+
+The backend returns one congestion record for each of the eight gates. Protocol validation errors are returned as structured WebSocket error messages without terminating the connection.
+
+## Application Modes
+
+### Default 3D stadium
+
+Open:
+
+```text
+http://localhost:5173/
+```
+
+This is the main experience. It contains the 4,000-person frontend simulation and the live `/ws/congestion` integration.
+
+### Legacy REST dashboard
+
+Open:
+
+```text
+http://localhost:5173/?mode=live
+```
+
+Despite the historical query name, this is not the live 3D person stream. It displays the separate Python `CrowdSimulation` zone model through REST. It is useful for exercising the baseline forecast and response API contracts, but it should not be used to claim end-to-end 3D forecast integration.
+
+## Repository Layout
+
+```text
+North Star/
+├── backend/
+│   ├── app/
+│   │   ├── congestion/       # Live per-person detector
+│   │   ├── forecasting/      # Deterministic mass-balance baseline
+│   │   ├── response/         # Formula-driven response placeholder
+│   │   ├── simulation/       # Separate synthetic zone simulation
+│   │   └── shared/           # REST API models
+│   ├── scripts/              # Baseline command-line runner
+│   └── tests/
+├── frontend/
+│   ├── e2e/                  # Playwright browser tests
+│   └── src/
+│       ├── components/       # Legacy REST dashboard
+│       └── twin/
+│           ├── congestion/   # WebSocket client and contracts
+│           ├── mock/         # Scenario, forecast and intervention fixtures
+│           ├── scene/        # React Three Fiber stadium
+│           ├── services/     # Twin service boundary
+│           ├── sim/          # 4,000-person movement model
+│           ├── state/        # Zustand application state
+│           └── ui/           # Existing operator interface
+├── shared/
+│   └── stadium-config.json   # React/Python geometry source of truth
+├── PROJECT_CONTEXT.md        # Canonical status and ordered backlog
+├── PROJECT_BRIEF.md          # Target product definition
+├── TEAM_TASK_DISTRIBUTION.md # Four-person ownership
+└── docker-compose.yml
+```
+
+## Prerequisites
+
+For local development:
+
+- Python 3.11 or newer;
+- Node.js 22 or a current compatible LTS release;
+- npm;
+- a browser with WebGL support.
+
+Docker Desktop or another Docker Compose implementation is optional.
+
+## Local Development
+
+### 1. Start the Python backend
+
+From the repository root:
 
 ```bash
 cd backend
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
-pip install -e ".[dev]"
-uvicorn app.main:app --reload
+python -m pip install --upgrade pip
+python -m pip install -e ".[dev]"
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-The API is available at `http://localhost:8000`; interactive documentation is at `http://localhost:8000/docs`.
+Verify the backend:
 
-Run the deterministic forecasting baseline directly:
-
-```bash
-cd backend
-python -m scripts.run_baseline --gate-b-closed --metro-delayed --steps 8
+```text
+http://localhost:8000/health
+http://localhost:8000/docs
 ```
 
-### Frontend
+### 2. Start the React frontend
+
+In a second terminal:
 
 ```bash
 cd frontend
-npm install
+npm ci
 npm run dev
 ```
 
-Open `http://localhost:5173`.
+Open `http://localhost:5173/`.
 
-Run the backend and frontend together. The default 3D stadium continues to run if Python is unavailable, but clearly marks congestion monitoring as unavailable and never fabricates a local detection result.
+The default URLs already work without a local environment file. For custom endpoints:
 
-## Per-person congestion path
+```bash
+cd frontend
+cp ../.env.example .env
+```
 
-- The frontend owns 4,000 deterministic person identities per run.
-- Each identity exits once; exited people never respawn.
-- People follow explicit seat-row, aisle, lower-base-path, gate-corridor, queue, and exit phases.
-- All eight exits can be opened or closed individually from the gate list.
-- The 3D twin sends a complete person snapshot once per real second to `ws://localhost:8000/ws/congestion`.
-- FastAPI calculates approach density, queue length, speed, and throughput for Gates A–H.
-- Congestion must persist for five simulated seconds before it is raised and must remain clear for ten simulated seconds before it is removed.
-- A closed or backend-confirmed congested gate triggers deterministic rerouting to the lowest-cost open alternative using distance, queue, and density—not an ML model.
-- Backend results appear in the existing incident strip, risk summary, gate list, and 3D gate treatment.
+Supported frontend variables:
 
-The detector is deterministic and intended for the prototype only. Its thresholds are engineering defaults, not certified crowd-safety limits.
+- `VITE_API_URL` — base URL for the REST dashboard;
+- `VITE_WS_URL` — legacy zone-snapshot WebSocket;
+- `VITE_CONGESTION_WS_URL` — live per-person congestion WebSocket.
 
-### Docker
+Never commit `.env` files containing local or secret values. The repository tracks only `.env.example`.
+
+## Running the Demo
+
+1. Start the backend and frontend.
+2. Confirm the header shows `Detector live`.
+3. Press `Start` and select a playback speed.
+4. Observe people leave their rows through the visible aisle gaps.
+5. Close Gate B or another gate from the gate list.
+6. Observe affected people return to the base path and select open alternatives.
+7. Wait for the Python detector to confirm congestion at any overloaded approach.
+8. Inspect the live gate density, queue, mean speed, throughput, incident strip, and 3D gate highlight.
+9. Reopen a gate or reset the run.
+
+Forecast curves and intervention comparisons shown during this flow remain mock scenario outputs until the live forecast and counterfactual milestones are completed.
+
+## Backend Interfaces
+
+Health and legacy REST demo:
+
+- `GET /health`
+- `GET /api/state`
+- `POST /api/simulation/start`
+- `POST /api/simulation/step`
+- `POST /api/simulation/pause`
+- `POST /api/simulation/reset`
+- `POST /api/incidents/{incident}`
+- `GET /api/forecasts`
+- `GET /api/interventions`
+- `POST /api/interventions/{intervention_id}/approve`
+
+WebSockets:
+
+- `/ws/congestion` — active 3D per-person input and eight-gate congestion output;
+- `/ws/telemetry` — legacy synthetic zone-snapshot output.
+
+## Deterministic Forecast Baseline
+
+The backend baseline extends the current zone mass balance:
+
+```text
+net flow = inflow per minute - outflow per minute
+future people = max(0, current people + net flow × horizon)
+future density = future people / zone area
+```
+
+Run its command-line example:
+
+```bash
+cd backend
+source .venv/bin/activate
+python -m scripts.run_baseline --gate-b-closed --metro-delayed --steps 8
+```
+
+This algorithm is implemented and tested, but the default 3D application does not yet supply it with live rolling zone histories.
+
+## Tests and Quality Checks
+
+Run backend tests and linting:
+
+```bash
+cd backend
+source .venv/bin/activate
+ruff check app tests
+pytest -q
+```
+
+Run frontend unit tests and the production build:
+
+```bash
+cd frontend
+npm test -- --run
+npm run build
+```
+
+Run browser tests:
+
+```bash
+cd frontend
+npx playwright install chromium
+npm run test:e2e -- --reporter=list
+```
+
+Validate repository and Docker configuration:
+
+```bash
+git diff --check
+docker compose config --quiet
+```
+
+At the time of this README update, the suite contains:
+
+- 15 backend tests;
+- 11 frontend unit tests;
+- four Playwright browser tests.
+
+The frontend production build currently emits a non-blocking large-chunk warning for the 3D bundles.
+
+## Docker
+
+Build and run both services from the repository root:
 
 ```bash
 docker compose up --build
 ```
 
-## Demo flow
+Then open:
 
-1. Start the simulation.
-2. Close Gate B or another selected exit from the gate controls.
-3. Observe people follow the seating aisles to the base path and gate corridors.
-4. Wait for Python to confirm persistent congestion at a loaded gate.
-5. Observe the live density, queue, speed, and throughput result in the existing UI.
-6. Observe affected people move toward lower-cost open exits.
-7. Reopen the gate or reset the deterministic run.
+- frontend: `http://localhost:5173`;
+- backend documentation: `http://localhost:8000/docs`.
 
-The congestion result is derived from per-person frontend telemetry by the Python detector. Forecast and intervention values in the default 3D experience remain deterministic demonstration data and are explicitly tracked as TODO in `PROJECT_CONTEXT.md`.
-
-## Tests
+Stop the stack with:
 
 ```bash
-cd backend && pytest
-cd frontend && npm test
-cd frontend && npm run test:e2e
+docker compose down
 ```
 
-## Safety statement
+## Immediate Roadmap
 
-CrowdGuardian is a hackathon decision-support prototype. It is not certified evacuation software and must not autonomously control real crowds.
+Work should proceed in this order:
 
+1. Implement a backend routing engine that returns changed person-to-gate assignments.
+2. Replace browser-owned routing decisions with execution of backend assignments.
+3. Export at least 100 reproducible stadium runs with 30-second zone telemetry.
+4. Connect live zone histories to the deterministic 5- and 10-minute forecast baseline.
+5. Add controlled comparisons for all-open, closed without rerouting, and closed with rerouting runs.
+6. Replace formula-driven response outcomes with real counterfactual simulation rollouts.
+7. Build leakage-safe gradient-boosted forecasting only after the dataset is validated.
+8. Freeze and rehearse the stadium demonstration before starting wildfire work.
+
+Detailed ownership and completion conditions are maintained in:
+
+- [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md)
+- [PROJECT_BRIEF.md](PROJECT_BRIEF.md)
+- [TEAM_TASK_DISTRIBUTION.md](TEAM_TASK_DISTRIBUTION.md)
+- [PERSON_1_TO_PERSON_2_DATA_HANDOFF.md](PERSON_1_TO_PERSON_2_DATA_HANDOFF.md)
+- [PERSON_2_ALGORITHM_IMPLEMENTATION.md](PERSON_2_ALGORITHM_IMPLEMENTATION.md)
+
+## Safety and Privacy
+
+- The prototype uses synthetic people and anonymous numerical IDs.
+- No facial recognition or personally identifiable information is required.
+- Detection thresholds and gate capacities are configurable demonstration assumptions.
+- Operator review remains mandatory for future real intervention recommendations.
+- CrowdGuardian must not claim certification, deployment readiness, or guaranteed safety.

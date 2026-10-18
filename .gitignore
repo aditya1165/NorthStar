@@ -1,33 +1,104 @@
+# ---------------------------------------------------------------------------
+# Operating-system files
+# ---------------------------------------------------------------------------
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+Desktop.ini
+
+# ---------------------------------------------------------------------------
+# Local environment and secrets
+# Keep only the documented example file in version control.
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.local
+*.pem
+*.key
+
+# ---------------------------------------------------------------------------
 # Python
+# ---------------------------------------------------------------------------
 __pycache__/
 *.py[cod]
-.pytest_cache/
-.ruff_cache/
+*$py.class
+*.so
+.Python
 .venv/
 venv/
+env/
+ENV/
+.eggs/
+*.egg
 *.egg-info/
+pip-wheel-metadata/
 
-# JavaScript
+# Python test, lint, type-check, and coverage output
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pyre/
+.hypothesis/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+junit.xml
+
+# ---------------------------------------------------------------------------
+# Node, TypeScript, Vite, and browser tests
+# ---------------------------------------------------------------------------
 node_modules/
+.npm/
+.pnpm-store/
+.yarn/
+.vite/
 dist/
+build/
 coverage/
+*.tsbuildinfo
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 playwright-report/
 test-results/
-*.tsbuildinfo
+blob-report/
+
+# TypeScript files generated beside Vite configuration
 frontend/vite.config.js
 frontend/vite.config.d.ts
 
-# Data and models
+# ---------------------------------------------------------------------------
+# Generated datasets and model artifacts
+# Small committed fixtures should live outside these generated directories.
+# ---------------------------------------------------------------------------
 data/generated/*
 !data/generated/.gitkeep
 data/models/*
 !data/models/.gitkeep
+data/exports/
+*.joblib
+*.onnx
 
-# Environment and editor files
-.env
-.env.*
-!.env.example
-.DS_Store
+# ---------------------------------------------------------------------------
+# Editors and local tooling
+# ---------------------------------------------------------------------------
 .idea/
 .vscode/
+*.swp
+*.swo
+*~
+.history/
 
+# ---------------------------------------------------------------------------
+# Temporary files and local overrides
+# ---------------------------------------------------------------------------
+.cache/
+.tmp/
+tmp/
+temp/
+docker-compose.override.yml
